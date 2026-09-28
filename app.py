@@ -14,25 +14,27 @@ st.markdown(
 )
 
 
-# 1. 산단 파일 자동 연동 안전성 처리 및 데이터 로드 함수
+# 1. 산단 파일 자동 연동 및 지번 기반 필터링 안전성 처리
 @st.cache_data
 def load_industrial_data():
   try:
-    # industrial_complex.csv 파일 로드 시도
+    # industrial_complex.csv 파일 로드 (지번 및 산단 업종 코드 데이터 포함)
     return pd.read_csv("industrial_complex.csv")
   except FileNotFoundError:
-    return None
+    return pd.DataFrame()
 
 
 df_industrial = load_industrial_data()
 
-# 2. 사용자 입력 섹션 (사이드바 UI - 원본 구조 완전 복원)
+# 2. 사용자 입력 섹션 (사이드바 UI)
 st.sidebar.header("🔍 진단 조건 입력")
 
-# 지번 및 주소 입력 필드
-input_address = st.sidebar.text_input("대상지 주소 또는 지번 입력", "예: 경남 양산시 물금읍 ...")
+# 지번 및 주소 입력 필드 (산단 연동의 핵심 기준점)
+input_address = st.sidebar.text_input(
+    "대상지 주소 또는 지번 입력", "예: 경남 양산시 산막동 ..."
+)
 
-# 업종 리스트 (요청하신 신규 업종 포함)
+# 업종 리스트 (청소년게임제공업, 축산물가공업 포함)
 industry_list = [
     "소매점 (일반 상가)",
     "음식점 / 카페",
@@ -66,54 +68,56 @@ area = st.sidebar.number_input(
 )
 
 st.sidebar.divider()
-st.sidebar.subheader("🏭 산업단지(지구) 진단 옵션")
+st.sidebar.subheader("🏭 산업단지(지구) 지번·업종 자동 연동")
 
-# 원본의 산단 입력 UI 구조 복원
-is_industrial_zone = st.sidebar.checkbox("산업단지 내 위치 여부 확인")
+has_industrial_complex = st.sidebar.checkbox("산업단지(지구) 내 위치 여부")
 
-industrial_code_input = ""
-selected_industrial_item = None
+matched_industrial_rows = pd.DataFrame()
+selected_industrial_code = ""
 
-if is_industrial_zone:
-  if df_industrial is not None and not df_industrial.empty:
-    st.sidebar.success("산단 데이터 파일(industrial_complex.csv) 연동 완료")
-    # 산단 업종 코드 검색 또는 선택 UI 복원
-    search_keyword = st.sidebar.text_input(
-        "산단 허용업종 검색 (명칭 또는 코드)", ""
-    )
-
-    if search_keyword:
-      filtered_df = df_industrial[
+if has_industrial_complex:
+  if not df_industrial.empty:
+    # 사용자가 입력한 지번/주소 키워드로 산단 데이터에서 매칭 검색 수행
+    if input_address and input_address != "예: 경남 양산시 산막동 ...":
+      # 주소나 지번 컬럼이 포함된 경우를 가정하여 검색 필터링
+      search_term = input_address.split()[-1]  - Last part (e.g., 지번 or 동/리)
+      matched_industrial_rows = df_industrial[
           df_industrial.astype(str)
-          .apply(lambda row: row.str.contains(search_keyword, case=False))
+          .apply(lambda row: row.str.contains(search_term, case=False))
           .any(axis=1)
       ]
-    else:
-      filtered_df = df_industrial
 
-    if not filtered_df.empty:
-      # 컬럼명에 따라 안전하게 선택지 구성
-      display_col = (
-          filtered_df.columns[1]
-          if len(filtered_df.columns) > 1
-          else filtered_df.columns[0]
+    if not matched_industrial_rows.empty:
+      st.sidebar.success(
+          f"✨ 지번 연동 성공: {len(matched_industrial_rows)}개의 허용 업종/필지"
+          " 코드가 조회되었습니다."
+      )
+      # 코드가 주루룩 뜨는 셀렉트박스 또는 멀티/싱글 셀렉트 구성
+      display_column = (
+          matched_industrial_rows.columns[1]
+          if len(matched_industrial_rows.columns) > 1
+          else matched_industrial_rows.columns[0]
       )
       selected_industrial_item = st.sidebar.selectbox(
-          "해당 산단 입주 가능 업종 선택", filtered_df[display_col].tolist()
+          "조회된 허용 업종 코드 및 내역 선택",
+          matched_industrial_rows[display_column].tolist(),
       )
+      selected_industrial_code = str(selected_industrial_item)
     else:
-      st.sidebar.warning("검색 결과가 없습니다. 직접 코드를 입력해주세요.")
-
-    industrial_code_input = st.sidebar.text_input(
-        "산단 업종분류 코드 직접 입력", ""
-    )
+      st.sidebar.warning(
+          "입력하신 지번과 일치하는 산단 데이터가 없습니다. 전체 목록에서"
+          " 선택하거나 코드를 직접 입력하세요."
+      )
+      selected_industrial_code = st.sidebar.text_input(
+          "산단 업종분류 코드 직접 입력", ""
+      )
   else:
     st.sidebar.warning(
-        "industrial_complex.csv 파일이 없습니다. 기본 텍스트 입력으로"
-        " 대체합니다."
+        "industrial_complex.csv 파일을 찾을 수 없습니다. 코드를 직접 입력해"
+        " 주세요."
     )
-    industrial_code_input = st.sidebar.text_input(
-        "산단 업종분류 코드 (직접 입력)", ""
+    selected_industrial_code = st.sidebar.text_input(
+        "산단 업종분류 코드 직접 입력", ""
     )
 
 # 3. 전기용량 현실화 산식 (업종별 표준 부하 밀도 반영)
@@ -136,21 +140,18 @@ violation_reasons = []
 solutions = []
 checkpoints = []
 
-# --- [산단 데이터 연동 검토 로직] ---
-if is_industrial_zone:
+# --- [산단 지번 연동 데이터 검토 로직] ---
+if has_industrial_complex:
   legal_basis.append(
       "산업집적활성화 및 공장설립에 관한 법률 (산단 관리기본계획)"
   )
   checkpoints.append(
-      "산업단지 내 입주이므로 관리기관(한국산업단지공단 또는 지자체)의 입주"
-      " 계약 및 업종 제한(입주가능 업종 코드) 확인 필수."
+      "산업단지 내 위치하므로 관리기관(한국산업단지공단 등)의 입주 계약 및"
+      " 관리기본계획상 업종 제한 부합 여부 확인 필수."
   )
-  if selected_industrial_item:
-    checkpoints.append(f"선택된 산단 업종 항목: {selected_industrial_item}")
-  if industrial_code_input:
+  if selected_industrial_code:
     checkpoints.append(
-        f"입력하신 산단 업종코드({industrial_code_input})에 대한 관리기본계획상"
-        " 허용 여부 대조 필요."
+        f"선택/매칭된 산단 업종 코드/내역: {selected_industrial_code}"
     )
 
 # --- [업종별 세부 판정 및 상세 설명 로직] ---
