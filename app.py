@@ -24,10 +24,13 @@ def load_industrial_data():
 
 df_industrial = load_industrial_data()
 
-# 2. 사용자 입력 섹션
+# 2. 사용자 입력 섹션 (사이드바 UI)
 st.sidebar.header("🔍 진단 조건 입력")
 
-# 업종 리스트 (인형뽑기방 및 축산물가공업 등 상세 포함)
+# 지번 및 주소 입력 필드 유지
+input_address = st.sidebar.text_input("대상지 주소 또는 지번 입력", "예: 경남 양산시 물금읍 ...")
+
+# 업종 리스트 (인형뽑기방 및 축산물가공업 포함)
 industry_list = [
     "소매점 (일반 상가)",
     "음식점 / 카페",
@@ -58,7 +61,10 @@ building_use = st.sidebar.selectbox(
 area = st.sidebar.number_input(
     "전용 면적 (㎡)", min_value=1.0, max_value=10000.0, value=85.0
 )
+
+# 산단 여부 및 업종 코드 관련 체크박스/입력 유지
 has_industrial_complex = st.sidebar.checkbox("산업단지(지구) 내 위치 여부")
+industrial_code_input = st.sidebar.text_input("산단 업종분류 코드 (선택)", "")
 
 # 3. 전기용량 현실화 산식 (업종별 표준 부하 밀도 반영)
 def calculate_power_limit(industry, area_val):
@@ -79,6 +85,21 @@ legal_basis = []
 violation_reasons = []
 solutions = []
 checkpoints = []
+
+# --- [산단 데이터 연동 검토 로직 반영] ---
+if has_industrial_complex and not df_industrial.empty:
+  legal_basis.append(
+      "산업집적활성화 및 공장설립에 관한 법률 (산단 관리기본계획)"
+  )
+  checkpoints.append(
+      "산업단지 내 입주이므로 관리기관(한국산업단지공단 또는 지자체)의 입주"
+      " 계약 및 업종 제한(입주가능 업종 코드) 확인 필수."
+  )
+  if industrial_code_input:
+    checkpoints.append(
+        f"입력하신 산단 업종코드({industrial_code_input})에 대한 해당 산단"
+        " 관리기본계획상 허용 여부 대조 필요."
+    )
 
 # --- [업종별 세부 판정 및 상세 설명 로직] ---
 
@@ -325,6 +346,8 @@ if is_suitable:
   st.success("✅ **[적합 검토]** 현재 조건에서 입주 가능성이 높습니다.")
 else:
   st.error("❌ **[부적합 / 조건부 검토]** 법적 제한 사항 또는 보완이 필요합니다.")
+
+st.markdown(f"**📌 진단 대상지:** {input_address}")
 
 st.markdown("### 📜 법적 근거 및 상세 분석")
 for b in legal_basis:
