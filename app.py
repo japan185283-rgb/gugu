@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 
-# 페이지 설정 (세로형 UI 유지)
+# 페이지 설정
 st.set_page_config(
     page_title="상가·공장·특수 업종 통합 부동산 인허가 진단 엔진",
     layout="centered",
@@ -13,24 +13,26 @@ st.markdown(
     " 상세 진단합니다."
 )
 
-# 1. 산단 파일 자동 연동 안전성 처리
+
+# 1. 산단 파일 자동 연동 안전성 처리 및 데이터 로드 함수
 @st.cache_data
 def load_industrial_data():
   try:
+    # industrial_complex.csv 파일 로드 시도
     return pd.read_csv("industrial_complex.csv")
   except FileNotFoundError:
-    return pd.DataFrame()
+    return None
 
 
 df_industrial = load_industrial_data()
 
-# 2. 사용자 입력 섹션 (사이드바 UI)
+# 2. 사용자 입력 섹션 (사이드바 UI - 원본 구조 완전 복원)
 st.sidebar.header("🔍 진단 조건 입력")
 
-# 지번 및 주소 입력 필드 유지
+# 지번 및 주소 입력 필드
 input_address = st.sidebar.text_input("대상지 주소 또는 지번 입력", "예: 경남 양산시 물금읍 ...")
 
-# 업종 리스트 (인형뽑기방 및 축산물가공업 포함)
+# 업종 리스트 (요청하신 신규 업종 포함)
 industry_list = [
     "소매점 (일반 상가)",
     "음식점 / 카페",
@@ -44,6 +46,7 @@ industry_list = [
 ]
 
 selected_industry = st.sidebar.selectbox("진단할 업종 선택", industry_list)
+
 building_use = st.sidebar.selectbox(
     "현재 건축물대장상 용도",
     [
@@ -62,9 +65,56 @@ area = st.sidebar.number_input(
     "전용 면적 (㎡)", min_value=1.0, max_value=10000.0, value=85.0
 )
 
-# 산단 여부 및 업종 코드 관련 체크박스/입력 유지
-has_industrial_complex = st.sidebar.checkbox("산업단지(지구) 내 위치 여부")
-industrial_code_input = st.sidebar.text_input("산단 업종분류 코드 (선택)", "")
+st.sidebar.divider()
+st.sidebar.subheader("🏭 산업단지(지구) 진단 옵션")
+
+# 원본의 산단 입력 UI 구조 복원
+is_industrial_zone = st.sidebar.checkbox("산업단지 내 위치 여부 확인")
+
+industrial_code_input = ""
+selected_industrial_item = None
+
+if is_industrial_zone:
+  if df_industrial is not None and not df_industrial.empty:
+    st.sidebar.success("산단 데이터 파일(industrial_complex.csv) 연동 완료")
+    # 산단 업종 코드 검색 또는 선택 UI 복원
+    search_keyword = st.sidebar.text_input(
+        "산단 허용업종 검색 (명칭 또는 코드)", ""
+    )
+
+    if search_keyword:
+      filtered_df = df_industrial[
+          df_industrial.astype(str)
+          .apply(lambda row: row.str.contains(search_keyword, case=False))
+          .any(axis=1)
+      ]
+    else:
+      filtered_df = df_industrial
+
+    if not filtered_df.empty:
+      # 컬럼명에 따라 안전하게 선택지 구성
+      display_col = (
+          filtered_df.columns[1]
+          if len(filtered_df.columns) > 1
+          else filtered_df.columns[0]
+      )
+      selected_industrial_item = st.sidebar.selectbox(
+          "해당 산단 입주 가능 업종 선택", filtered_df[display_col].tolist()
+      )
+    else:
+      st.sidebar.warning("검색 결과가 없습니다. 직접 코드를 입력해주세요.")
+
+    industrial_code_input = st.sidebar.text_input(
+        "산단 업종분류 코드 직접 입력", ""
+    )
+  else:
+    st.sidebar.warning(
+        "industrial_complex.csv 파일이 없습니다. 기본 텍스트 입력으로"
+        " 대체합니다."
+    )
+    industrial_code_input = st.sidebar.text_input(
+        "산단 업종분류 코드 (직접 입력)", ""
+    )
 
 # 3. 전기용량 현실화 산식 (업종별 표준 부하 밀도 반영)
 def calculate_power_limit(industry, area_val):
@@ -86,8 +136,8 @@ violation_reasons = []
 solutions = []
 checkpoints = []
 
-# --- [산단 데이터 연동 검토 로직 반영] ---
-if has_industrial_complex and not df_industrial.empty:
+# --- [산단 데이터 연동 검토 로직] ---
+if is_industrial_zone:
   legal_basis.append(
       "산업집적활성화 및 공장설립에 관한 법률 (산단 관리기본계획)"
   )
@@ -95,10 +145,12 @@ if has_industrial_complex and not df_industrial.empty:
       "산업단지 내 입주이므로 관리기관(한국산업단지공단 또는 지자체)의 입주"
       " 계약 및 업종 제한(입주가능 업종 코드) 확인 필수."
   )
+  if selected_industrial_item:
+    checkpoints.append(f"선택된 산단 업종 항목: {selected_industrial_item}")
   if industrial_code_input:
     checkpoints.append(
-        f"입력하신 산단 업종코드({industrial_code_input})에 대한 해당 산단"
-        " 관리기본계획상 허용 여부 대조 필요."
+        f"입력하신 산단 업종코드({industrial_code_input})에 대한 관리기본계획상"
+        " 허용 여부 대조 필요."
     )
 
 # --- [업종별 세부 판정 및 상세 설명 로직] ---
