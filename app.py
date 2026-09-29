@@ -71,7 +71,7 @@ zoning_restrictions = {
     "계획관리지역": {"prohibited": ["위락시설", "무도장", "카지노"]}
 }
 
-# 🌟 양산시 도시계획 조례 및 건축 조례 기반 용도지역별 세부 업종 교차 진단 데이터베이스
+# 🌟 [업종 연동형 개편] 양산시 도시계획 조례 및 건축 조례 기반 용도지역별 세부 업종 교차 진단 데이터베이스
 yangsan_ordinance_rules = {
     "제1종전용주거지역": {
         "additional_prohibited": ["음식점", "카페", "제과점", "골프연습장", "안마시술소", "학원", "PC방", "노래연습장", "사무소", "식육판매업", "미용업", "세탁소", "동물위탁관리업", "동물미용업", "공인중개사", "병원", "의원"],
@@ -438,14 +438,15 @@ if submitted:
             if bld_use != "공장":
                 if bld_use == "제2종근린생활시설" and area < 500.0:
                     warnings.append(
-                        f"[제2종근생 제조업 예외 요건 심사] 주용도가 '제2종근린생활시설'이며 면적({area}㎡)이 500㎡ 미만입니다. "
-                        f"다만, 오폐수·악취 등 환경오염 배출시설 허가 대상인 경우 입주가 원천 불가능합니다. "
-                        f"💡 **해결 대안:** 관할 양산시청 환경부서 및 위생과를 통해 '배출시설 비대상'임을 사전 확인받으세요."
+                        f"[제2종근생 제조업 예외 요건 심사 - 표시변경 활용 가능] 주용도가 '제2종근린생활시설'이며 면적({area}㎡)이 500㎡ 미만입니다. "
+                        f"건축법 시행령 별표 1에 따라 일정 규모 미만의 소규모 제조업소(예: 떡집, 방앗간, 인쇄소 등)는 제2종근린생활시설에 입점이 가능할 수 있습니다. "
+                        f"다만, 오폐수·악취·대기 등 환경오염 배출시설 허가 대상인 경우 입주가 원천 불가능합니다. "
+                        f"💡 **해결 대안:** 상가 전체 건물의 용도를 통째로 '공장'으로 바꾸지 않고도, 건축물대장상 세부 용도를 **'제2종근린생활시설(제조업소)'** 등으로 맞추기 위해 관할 관청에 **'건축물대장 표시변경 신청'**을 거쳐 입점할 수 있는지 건축사 및 주무관과 사전 협의하세요."
                     )
                 else:
                     fatal_errors.append(
-                        f"[건축법 위반] 해당 제조업·가공업은 주용도가 원칙적으로 **'공장'**이어야 합니다. (현재: {bld_use}, 면적: {area}㎡) "
-                        f"💡 **해결 대안:** 공장 또는 지식산업센터 내 공장 용도로 물건을 변경해야 합니다."
+                        f"[건축법 위반 / 용도 불일치] 해당 제조업·가공업은 주용도가 원칙적으로 **'공장'**이어야 합니다. (현재: {bld_use}, 면적: {area}㎡) "
+                        f"💡 **해결 대안:** 500㎡ 미만 소규모 제조업의 경우 제2종근린생활시설 내에서 '표시변경'을 통해 입점 가능한 경우가 있으나, 현재 주용도({bld_use})가 이에 해당하지 않거나 면적·업종 제한에 걸리므로 공장 전용 건물로 이전하거나 정식 '용도변경 허가' 가능 여부를 검토해야 합니다."
                     )
             else:
                 legal_actions.append("🏭 **[공장 내 가공 실무 체크]** 주용도가 '공장'으로 적합합니다. 산집법 및 환경법상 배출시설 허가 여부를 검토하세요.")
@@ -692,34 +693,37 @@ if submitted:
 
     with tab1:
         st.subheader("📋 공법상 적합성 및 상세 법적 리포트")
+        st.markdown("---")
         
-        # ❌ 결격/위반 사유 카드 디자인 적용
+        # 1. 치명적 결격 / 계약 금지 사유 (카드형 UI)
         if fatal_errors:
-            st.error("🚨 **[계약 절대 금지 / 중개사고 고위험 사유]**")
-            for i, err in enumerate(fatal_errors, 1):
-                with st.container(border=True):
-                    st.markdown(f"**결격 사유 {i}**")
-                    st.markdown(err)
+            st.error("### ❌ [계약 절대 금지 / 중개사고 고위험 사유]")
+            for err in fatal_errors:
+                with st.container():
+                    st.markdown(f"> **🚨 법적 결격 사유**\n> {err}")
+                    st.markdown("")
         else:
-            st.success("✅ **[공법상 입주 및 영업 기본 요건 적합]** 치명적인 결격 사유가 발견되지 않았습니다.")
-            
-        # ⚠️ 주의 사항 카드 디자인 적용
+            st.success("### ✅ [공법상 입주 및 영업 기본 요건 적합]\n임차인 희망 업종이 선택하신 물건의 용도지역 및 건축물 주용도 기준에 적합합니다.")
+
+        st.markdown("")
+
+        # 2. 주의 및 필수 검토 사항 (카드형 UI)
         if warnings:
-            st.markdown("")
-            st.warning("⚠️ **[주의 및 필수 검토 사항]**")
-            for i, w in enumerate(warnings, 1):
-                with st.container(border=True):
-                    st.markdown(f"**주의 사항 {i}**")
-                    st.markdown(w)
-                    
-        # 🛠️ 실무 법적 조치 카드 디자인 적용
+            st.warning("### ⚠️ [주의 및 필수 검토 사항]")
+            for w in warnings:
+                with st.container():
+                    st.markdown(f"> **🔍 검토 포인트**\n> {w}")
+                    st.markdown("")
+
+        st.markdown("")
+
+        # 3. 실무 법적 조치 및 상세 가이드 (카드형 UI)
         if legal_actions:
-            st.markdown("")
-            st.info("🛠️ **[실무 법적 조치 및 상세 가이드]**")
-            for i, act in enumerate(legal_actions, 1):
-                with st.container(border=True):
-                    st.markdown(f"**실무 가이드 {i}**")
-                    st.markdown(act)
+            st.info("### 🛠️ [실무 법적 조치 및 상세 가이드 / 허가 절차 안내]")
+            for act in legal_actions:
+                with st.container():
+                    st.markdown(f"> **📌 실무 솔루션**\n> {act}")
+                    st.markdown("")
 
     with tab2:
         st.subheader("💰 상하수도 원인자부담금 시뮬레이션")
