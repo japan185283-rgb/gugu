@@ -71,7 +71,7 @@ zoning_restrictions = {
     "계획관리지역": {"prohibited": ["위락시설", "무도장", "카지노"]}
 }
 
-# 🌟 [업종 연동형 개편] 양산시 도시계획 조례 및 건축 조례 기반 용도지역별 세부 업종 교차 진단 데이터베이스
+# 🌟 양산시 도시계획 조례 및 건축 조례 기반 용도지역별 세부 업종 교차 진단 데이터베이스
 yangsan_ordinance_rules = {
     "제1종전용주거지역": {
         "additional_prohibited": ["음식점", "카페", "제과점", "골프연습장", "안마시술소", "학원", "PC방", "노래연습장", "사무소", "식육판매업", "미용업", "세탁소", "동물위탁관리업", "동물미용업", "공인중개사", "병원", "의원"],
@@ -310,7 +310,7 @@ if submitted:
     warnings = []
     legal_actions = []
 
-    # 1. 용도지역 제한 검증 (국토계획법)
+    # 1. 용도지역 제한 검증 (국토계획법) - 중복 출력 방지 완벽 처리
     if property_type == "상가 / 일반 건축물" and zoning in zoning_restrictions:
         prohibited_list = zoning_restrictions[zoning]["prohibited"]
         for p in prohibited_list:
@@ -320,15 +320,14 @@ if submitted:
                     f"'{target_biz}'의 입점 및 영업이 법적으로 원천 금지되어 있습니다. "
                     f"💡 **해결 대안:** 해당 용도지역 내에서는 허용되지 않으므로, 상업지역 등 해당 업종이 허용되는 다른 입지로 물건을 변경해야 합니다."
                 )
+                break  # 중복 추가 방지
 
     # 🌟 2. [업종 연동형 정밀 교차 체크] 양산시 도시계획 조례 기반 세부 업종별 규제 진단
     if property_type == "상가 / 일반 건축물" and zoning in yangsan_ordinance_rules:
         yangsan_rule = yangsan_ordinance_rules[zoning]
         
-        # 사용자가 선택한 세부 업종과 양산시 추가 금지 업종 키워드 전수 매칭
         matched_ban = False
         for add_p in yangsan_rule["additional_prohibited"]:
-            # 업종 명칭이나 대분류에 금지 키워드가 포함되어 있는지 정밀 대조
             if add_p in target_biz or add_p in biz_category or any(kw in target_biz for kw in add_p.split()):
                 matched_ban = True
                 fatal_errors.append(
@@ -339,7 +338,7 @@ if submitted:
                 )
                 break
         
-        # 금지 업종에 걸리지 않은 경우, 해당 조례 기준에 따른 적합 안내 및 실무 가이드 제공
+        # 금지 업종에 걸리지 않은 경우에만 통과 문구 출력
         if not matched_ban:
             if zoning == "중심상업지역":
                 warnings.append(
@@ -352,15 +351,24 @@ if submitted:
                     f"(기준 근거: {yangsan_rule['legal_basis']})"
                 )
 
-    # 🌟 2-1. [도시계획 + 건축조례 동시교차 검증] 양산시 건축 조례상 높이, 일조권 및 주차장 기준 검토 추가
+    # 🌟 2-1. [도시계획 조례 및 건축 조례 관련 꼼꼼히 짚어야 할 사항 / 강화된 규제 검토]
     if property_type == "상가 / 일반 건축물" and zoning in yangsan_building_ordinance_rules:
         bld_rule = yangsan_building_ordinance_rules[zoning]
-        legal_actions.append(
-            f"📐 **[양산시 건축 조례 동시교차 검증 - 높이 및 일조]** {bld_rule['max_height_rule']}"
-        )
-        legal_actions.append(
-            f"🚗 **[양산시 건축 조례 동시교차 검증 - 주차장 기준]** {bld_rule['parking_rule']}"
-        )
+        if fatal_errors:
+            # 위에서 이미 절대 금지된 업종인 경우, 아래 건축/도시계획 조례 안내를 '통과' 느낌이 아니라 '꼼꼼히 짚어야 할 조례 검토 사항'으로 명시
+            legal_actions.append(
+                f"📐 **[양산시 건축 조례 꼼꼼히 짚어야 할 사항 - 높이 및 일조]** 상기 업종은 입점이 불가하나, 해당 건물의 양산시 건축 조례상 기준은 다음과 같습니다: {bld_rule['max_height_rule']}"
+            )
+            legal_actions.append(
+                f"🚗 **[양산시 건축 조례 꼼꼼히 짚어야 할 사항 - 주차장 기준]** 부설주차장 설치 기준: {bld_rule['parking_rule']}"
+            )
+        else:
+            legal_actions.append(
+                f"📐 **[양산시 건축 조례 동시교차 검증 - 높이 및 일조]** {bld_rule['max_height_rule']}"
+            )
+            legal_actions.append(
+                f"🚗 **[양산시 건축 조례 동시교차 검증 - 주차장 기준]** {bld_rule['parking_rule']}"
+            )
 
     # 3. 학교정화구역 검증 (학교보건법)
     if has_school_zone:
