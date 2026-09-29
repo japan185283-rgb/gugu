@@ -316,7 +316,6 @@ if submitted:
         for p in prohibited_list:
             if p in target_biz or p in biz_category or (p == "위락시설" and target_biz in ["무도장 및 카지노업소", "유흥주점 (룸살롱·클럽 - 위락시설)", "단란주점"]):
                 fatal_errors.append(
-                    f"**[국토계획법 제76조 위반]** '{zoning}' 지역에서는 '{target_biz}'의 입점 및 영업이 원천 금지됩니다.
 
 ```
 
