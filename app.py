@@ -71,6 +71,34 @@ zoning_restrictions = {
     "계획관리지역": {"prohibited": ["위락시설", "무도장", "카지노"]}
 }
 
+# 🌟 [추가] 양산시 도시계획 조례 및 건축 조례 기반 용도지역별 추가 제한 및 특례 데이터베이스
+yangsan_ordinance_rules = {
+    "제1종전용주거지역": {
+        "additional_prohibited": ["제2종근린생활시설 중 일반음식점", "휴게음식점", "골프연습장", "안마시술소"],
+        "special_exception": "양산시 도시계획 조례에 따라 부수적인 건축물(공중화장실 등) 외에는 조례로 엄격히 제한됩니다."
+    },
+    "제1종일반주거지역": {
+        "additional_prohibited": ["단란주점", "안마시술소", "골프연습장(주거환경 저해 시 제한)"],
+        "special_exception": "양산시 도시계획 조례 별표에 의거, 교육환경보호구역 및 주거 밀집 지역 내 소음·악취 유발 시설은 건축 위원회 심의를 거칠 수 있습니다."
+    },
+    "제2종일반주거지역": {
+        "additional_prohibited": ["단란주점(주거지역 경계 50m 이내 제한)", "안마시술소"],
+        "special_exception": "양산시 건축 조례에 따라 층수 제한 및 일조권 확보를 위한 높이 제한이 엄격하게 적용됩니다."
+    },
+    "준주거지역": {
+        "additional_prohibited": ["숙박시설(주거환경 보호가 필요한 지역)", "위락시설 중 일부"],
+        "special_exception": "양산시 도시계획 조례상 주거·상업 혼재 지역으로, 학교 및 공동주택 부지 경계로부터의 직선거리에 따라 숙박·위락시설 허가가 제한될 수 있습니다."
+    },
+    "자연녹지지역": {
+        "additional_prohibited": ["일반음식점(연면적 조례 초과 제한)", "숙박시설", "공장(일부 업종)"],
+        "special_exception": "양산시 조례에 따라 건폐율 및 용적률이 적용되며, 성장관리방안 수립 여부에 따라 허용 업종 및 건폐율 인센티브가 적용될 수 있습니다."
+    },
+    "계획관리지역": {
+        "additional_prohibited": ["숙박시설(배출시설 허가 대상)", "아파트 등 공동주택(조례 기준 초과 시)"],
+        "special_exception": "양산시 도시계획 조례에 따라 공장 및 제조업소 입주 시 배출시설 설치 승인 대상인 경우 지정된 업종만 허용될 수 있습니다."
+    }
+}
+
 st.markdown("---")
 
 # 3. 대상 부동산 기본 팩트 입력
@@ -192,6 +220,24 @@ if submitted:
                     f"'{target_biz}'의 입점 및 영업이 법적으로 원천 금지되어 있습니다. "
                     f"💡 **해결 대안:** 해당 용도지역 내에서는 허용되지 않으므로, 상업지역 등 해당 업종이 허용되는 다른 입지로 물건을 변경해야 합니다."
                 )
+
+    # 🌟 [추가] 양산시 도시계획 조례 및 건축 조례 특례 심사 로직
+    if property_type == "상가 / 일반 건축물" and zoning in yangsan_ordinance_rules:
+        yangsan_rule = yangsan_ordinance_rules[zoning]
+        
+        # 1) 양산시 조례상 추가 금지 업종 검증
+        for add_p in yangsan_rule["additional_prohibited"]:
+            if add_p in target_biz or (any(keyword in target_biz for keyword in add_p.split())):
+                fatal_errors.append(
+                    f"[양산시 도시계획 조례 위반] 양산시 지역 조례에 따라 '{zoning}'에서는 '{target_biz}'({add_p} 관련)의 입점 및 허가가 추가로 제한 또는 금지됩니다. "
+                    f"💡 **해결 대안:** 양산시 허가 부서 또는 건축과에 사전 허가 가능 여부를 확인하거나 타 지역 물건을 검토하세요."
+                )
+        
+        # 2) 양산시 조례 특례 안내 및 주의사항 추가
+        if yangsan_rule["special_exception"]:
+            warnings.append(
+                f"🏛️ **[양산시 조례 특례 및 허가 기준 안내]** {yangsan_rule['special_exception']}"
+            )
 
     # 2. 학교정화구역 검증 (학교보건법)
     if has_school_zone:
