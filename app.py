@@ -1,3 +1,8 @@
+요청하신 대로 **상세 법적 리포트 탭의 가독성을 대폭 개선**하여 한눈에 쏙 들어오도록 정리하고, 사용자분이 말씀하신 **'표시변경을 통한 2종근생(제조업소) 허용', '기타용도 내 세부 업종 기재(예: 수리점 등)에 따른 영업 허용 여부', '기타용도에 따라 바뀔 수 있는 세부 업종별 허가 조건'** 등 실무에서 가장 중요한 핵심 예외·전환 규정들을 전면 보완하여 모든 업종을 아우르도록 코드를 업그레이드했습니다.
+
+코드를 통째로 복사해서 깃허브에 한 번에 붙여넣으실 수 있도록 전체 소스 코드를 제공해 드립니다.
+
+```python
 import streamlit as st
 import pandas as pd
 import os
@@ -71,7 +76,7 @@ zoning_restrictions = {
     "계획관리지역": {"prohibited": ["위락시설", "무도장", "카지노"]}
 }
 
-# 양산시 도시계획 조례 및 건축 조례 기반 용도지역별 세부 업종 교차 진단 데이터베이스
+# 🌟 양산시 도시계획 조례 및 건축 조례 기반 용도지역별 세부 업종 교차 진단 데이터베이스
 yangsan_ordinance_rules = {
     "제1종전용주거지역": {
         "additional_prohibited": ["음식점", "카페", "제과점", "골프연습장", "안마시술소", "학원", "PC방", "노래연습장", "사무소", "식육판매업", "미용업", "세탁소", "동물위탁관리업", "동물미용업", "공인중개사", "병원", "의원"],
@@ -135,6 +140,7 @@ yangsan_ordinance_rules = {
     }
 }
 
+# 🌟 양산시 건축 조례 상세 건축기준 및 특례 데이터베이스
 yangsan_building_ordinance_rules = {
     "제1종전용주거지역": {
         "max_height_rule": "양산시 건축 조례에 따라 인접 대지경계선 및 도로와의 관계에 따른 높이 제한이 매우 엄격하며, 일조권 확보를 위한 건축물 높이 제한이 우선 적용됩니다.",
@@ -283,7 +289,7 @@ comprehensive_biz_dict = {
         "보습학원·입시학원 및 외국어학원", "독서실 및 스터디카페", "직업훈련소 및 기술학원", "PC방 및 노래연습장", "청소년게임제공업 (인형뽑기방·오락실)"
     ],
     "🚗 자동차 및 환경·세차장": [
-        "세차장 (손세차·자동세차 - 폐수배출)", "자동차정비공장 (카센터)", "자동차매매장 및 전시장", "주차장업"
+        "세차장 (손세차·자동세차 - 폐수배출)", "자동차정비공장 (카센터 - 수리점)", "자동차매매장 및 전시장", "주차장업"
     ],
     "🏡 숙박 및 공유숙박": [
         "일반 숙박업 (모텔·호텔·여관)", "생활숙박시설(레지던스)", "오피스텔 에어비앤비", "외국인관광 도시민박업 (에어비앤비 합법)", "펜션 및 휴양콘도미니엄"
@@ -314,323 +320,677 @@ if submitted:
         prohibited_list = zoning_restrictions[zoning]["prohibited"]
         for p in prohibited_list:
             if p in target_biz or p in biz_category or (p == "위락시설" and target_biz in ["무도장 및 카지노업소", "유흥주점 (룸살롱·클럽 - 위락시설)", "단란주점"]):
-                fatal_errors.append({
-                    "title": f"[국토계획법 제한] '{zoning}' 지역 입점 원천 금지",
-                    "content": f"국토의 계획 및 이용에 관한 법률 시행령에 따라 '{zoning}' 지역 내에서는 '{target_biz}'의 입점 및 영업이 법적으로 엄격히 금지됩니다.",
-                    "solution": "용도지역 제한은 용도변경이나 기재변경으로 해결할 수 없습니다. 상업지역 등 해당 업종이 허용되는 타 용도지역 상가로 물건을 완전히 변경해야 합니다.",
-                    "sub_note": None
-                })
+                fatal_errors.append(
+                    f"**[국토계획법 제76조 위반]** '{zoning}' 지역에서는 '{target_biz}'의 입점 및 영업이 원천 금지됩니다.
 
-    # 2. [업종 연동형 정밀 교차 체크] 양산시 도시계획 조례 기반 세부 업종별 규제 진단
-    if property_type == "상가 / 일반 건축물" and zoning in yangsan_ordinance_rules:
-        yangsan_rule = yangsan_ordinance_rules[zoning]
-        
-        matched_ban = False
-        for add_p in yangsan_rule["additional_prohibited"]:
-            if add_p in target_biz or add_p in biz_category or any(kw in target_biz for kw in add_p.split()):
-                matched_ban = True
-                fatal_errors.append({
-                    "title": f"[양산시 도시계획 조례 위반] 계약 절대 금지",
-                    "content": f"국토계획법상 가능하더라도, **양산시 도시계획 조례**에 따라 '{zoning}' 지역에서는 임차인이 선택한 **'{target_biz}'**의 입점 및 건축허가가 추가로 차단됩니다.\n\n📜 **법적 근거:** {yangsan_rule['legal_basis']}",
-                    "solution": "양산시 조례 기준 위반이므로 계약 불가. 양산시 조례상 해당 업종이 허용되는 타 지역 상가를 수배하세요.",
-                    "sub_note": None
-                })
-                break
-        
-        if not matched_ban:
-            if zoning == "중심상업지역":
-                warnings.append({
-                    "title": "🏛️ [양산시 도시계획 조례 크로스 체크 - 중심상업지역 주의]",
-                    "content": f"{yangsan_rule['legal_basis']}\n\n💡 중심상업지역이라 업종 자체는 허용되나, 현장 실무 시 **주차장법 대수 기준 및 소방방재 시설 기준** 미달로 인한 허가 반려 사고가 빈번하므로 건축물대장 및 소방 동선을 반드시 실측·확인하세요.",
-                    "sub_note": None
-                })
-            else:
-                legal_actions.append({
-                    "title": "🏛️ [양산시 도시계획 조례 교차 검증 통과]",
-                    "content": f"'{zoning}' 지역 내에서 **'{target_biz}'** 입점은 양산시 조례상 추가 제한 규정에 저촉되지 않으며 법적 근거가 확보됩니다. (근거: {yangsan_rule['legal_basis']})",
-                    "sub_note": None
-                })
+```
 
-    # 2-1. [도시계획 + 건축조례 동시교차 검증] 양산시 건축 조례상 높이, 일조권 및 주차장 기준 검토
-    if property_type == "상가 / 일반 건축물" and zoning in yangsan_building_ordinance_rules:
-        bld_rule = yangsan_building_ordinance_rules[zoning]
-        legal_actions.append({
-            "title": "📐 [양산시 건축 조례 동시교차 검증 - 건축기준/주차장]",
-            "content": f"**[높이/일조]** {bld_rule['max_height_rule']}\n\n🚗 **[주차장]** {bld_rule['parking_rule']}",
-            "sub_note": None
-        })
 
-    # 3. 학교정화구역 검증 (학교보건법)
-    if has_school_zone:
-        if any(kw in target_biz for kw in ["유흥주점", "단란주점", "PC방", "노래연습장", "호텔", "모텔", "당구장", "청소년게임제공업", "인형뽑기방", "무도장", "카지노", "생활숙박시설"]):
-            fatal_errors.append({
-                "title": "[학교보건법 위반] 학교환경위생정화구역 저촉",
-                "content": f"본 물건지는 학교환경위생정화구역 내에 위치하고 있어 '{target_biz}'의 영업이 원칙적으로 금지됩니다.",
-                "solution": "절대정화구역인 경우 영업이 절대 불가하며, 상대정화구역인 경우 관할 양산교육지원청 학교환경위생정화위원회 심의를 통과해야만 허가 가능합니다.",
-                "sub_note": None
-            })
 
-    # 4. [건축법 주용도 및 "기타용도(표시변경)" 전수 검증]
-    if property_type == "상가 / 일반 건축물":
-        
-        if "동물위탁관리업" in target_biz:
-            if area >= 300.0 and bld_use != "동물관련시설":
-                fatal_errors.append({
-                    "title": "[건축법 위반] 면적 300㎡ 이상 동물위탁시설 용도 부적합",
-                    "content": f"면적 300㎡ 이상 동물위탁시설은 주용도가 반드시 '동물관련시설'이어야 합니다. (현재 주용도: {bld_use}, 면적: {area}㎡)",
-                    "solution": "건축법 제19조에 따라 건축물 용도변경 허가를 거쳐 주용도를 '동물관련시설'로 완전히 변경해야 합니다.",
-                    "sub_note": "이 면적은 단순 기재변경으로 해결할 수 없으며, 정식 용도변경 설계가 필요합니다."
-                })
-            elif area < 300.0 and bld_use not in ["제2종근린생활시설", "동물관련시설"]:
-                fatal_errors.append({
-                    "title": "[건축법 위반] 300㎡ 미만 동물위탁관리업 용도 부적합",
-                    "content": f"300㎡ 미만 동물위탁관리업(유치원, 호텔 등)은 주용도가 최소 '제2종근린생활시설'이어야 합니다. (현재 주용도: {bld_use})",
-                    "solution": "제2종근린생활시설로 건축물 용도변경 허가(또는 신고)를 선행해야 합니다.",
-                    "sub_note": "주용도가 이미 제2종근린생활시설인 경우라도, 건축물대장 우측 상단의 '기타용도(세부용도)'에 동물관련 영업 명시가 없으면 영업등록이 안 될 수 있습니다. 관할청에 **기재사항 변경(표시변경)**을 신청하여 기타용도란에 명확히 표기해 두세요."
-                })
-            else:
-                legal_actions.append({
-                    "title": "🐶 [반려동물 영업 적합 검토 가이드]",
-                    "content": "건축법상 주용도 및 면적 요건은 적합합니다. ① 동물보호법에 따른 독립된 공간(이중문), ② CCTV 설치, ③ 인접 호실 민원 방지를 위한 방음·방취 공사를 특약에 명시하세요.",
-                    "sub_note": "현재 대장상 2종근생이더라도 기타용도가 '사무소' 등으로 되어있더라도, **'기재변경'**을 통해 동물관련 영업임을 분명히 하는 것이 훗날 민원이나 갱신 시 안전합니다."
-                })
-        
-        elif "동물미용업" in target_biz or "동물생산업·판매업" in target_biz:
-            if bld_use not in ["제1종근린생활시설", "제2종근린생활시설", "동물관련시설"]:
-                fatal_errors.append({
-                    "title": "[건축법 위반] 동물미용업/펫샵 용도 부적합",
-                    "content": f"동물미용업 및 펫샵은 주용도가 제1·2종근린생활시설 또는 동물관련시설이어야 합니다. (현재: {bld_use})",
-                    "solution": "적합한 용도의 상가로 용도변경하거나 다른 물건을 수배하세요.",
-                    "sub_note": "주용도가 1/2종 근생이 맞다면, 대장상 기타용도에 해당 업종이 명시되어 있는지 체크하고 필요시 **표시변경 신청**을 하세요."
-                })
-            else:
-                legal_actions.append({
-                    "title": "🐾 [동물미용/판매업 실무 체크]",
-                    "content": "동물보호법에 따른 시설기준(격리실, 급수시설 등) 준수 여부를 확인하세요.",
-                    "sub_note": "동일한 근린생활시설 내라도 기타용도가 다른 업종으로 되어있을 경우, 담당 공무원에 따라 **기재변경(표시변경)**을 요구할 수 있으니 영업등록 전 필히 대장을 확인하세요."
-                })
+"
+f"💡 **해결 대안:** 해당 용도지역 내에서는 불가하므로, 상업지역 등 허용되는 타 입지로 변경해야 합니다."
+)
 
-        elif "일반음식점" in target_biz or "휴게음식점" in target_biz or "제과점" in target_biz:
-            if "300㎡이상" in target_biz and bld_use != "제2종근린생활시설" and bld_use != "판매시설":
-                fatal_errors.append({
-                    "title": "[건축법 위반] 대형 휴게음식점 용도 부적합",
-                    "content": f"바닥면적 300㎡ 이상의 휴게음식점은 '제2종근린생활시설'(또는 판매시설)이어야 합니다. (현재: {bld_use}, 면적: {area}㎡)",
-                    "solution": "제2종근린생활시설로 용도변경 필수.",
-                    "sub_note": "용도변경 시 기타용도란에 명확히 '휴게음식점'을 명시하여 신청하세요."
-                })
-            elif bld_use not in ["제1종근린생활시설", "제2종근린생활시설", "판매시설", "숙박시설"]:
-                fatal_errors.append({
-                    "title": "[건축법 위반] 음식점 영업 용도 부적합",
-                    "content": f"해당 음식·휴게업은 제1·2종 근린생활시설 등에 해당해야 영업허가/신고가 가능합니다. (현재: {bld_use})",
-                    "solution": "건축물 용도를 근린생활시설로 변경해야 합니다.",
-                    "sub_note": None
-                })
-            else:
-                legal_actions.append({
-                    "title": "🍽️ [음식점 창업 실무 꼼꼼 체크]",
-                    "content": "식품위생법에 따른 위생교육 수령, 지하층인 경우 직통계단 설치 여부 및 그리스트랩 설치 의무를 확인하세요.",
-                    "sub_note": "현재 건축물대장의 기타용도가 '일반음식점', '휴게음식점', '제과점' 등 실제 업종과 정확히 일치해야 가장 안전합니다. 만약 2종근생이면서 기타용도가 '사무소' 등으로 되어 있다면, 관할청에 **기재사항 변경(표시변경)**을 신청하여 용도를 완벽히 일치시키세요."
-                })
+```
+# 🌟 2. [업종 연동형 정밀 교차 체크] 양산시 도시계획 조례 기반 세부 업종별 규제 진단
+if property_type == "상가 / 일반 건축물" and zoning in yangsan_ordinance_rules:
+    yangsan_rule = yangsan_ordinance_rules[zoning]
+    
+    matched_ban = False
+    for add_p in yangsan_rule["additional_prohibited"]:
+        if add_p in target_biz or add_p in biz_category or any(kw in target_biz for kw in add_p.split()):
+            matched_ban = True
+            fatal_errors.append(
+                f"**[양산시 도시계획 조례 위반 / 계약 절대금지]** '{zoning}' 지역 내 **'{target_biz}'** 입점은 조례에 따라 금지됩니다.
 
-        elif "자동차정비공장" in target_biz or "자동차매매장" in target_biz:
-            if bld_use != "자동차관련시설":
-                fatal_errors.append({
-                    "title": "[건축법 위반] 카센터 및 정비공장 용도 부적합",
-                    "content": f"카센터 및 자동차정비·매매장은 주용도가 원칙적으로 **'자동차관련시설'**이어야 합니다. (현재: {bld_use})",
-                    "solution": "자동차관련시설 용도 상가로 이전 또는 용도변경해야 합니다.",
-                    "sub_note": "💡 **[카센터 특례]** 만약 바닥면적 500㎡ 미만의 카센터(부분정비)라면, 주용도가 '자동차관련시설'이 아니더라도 **'제2종근린생활시설'**이면서 기타용도(세부용도)에 **'수리점'**으로 되어 있으면 영업이 가능합니다. 주용도가 2종근생인데 다른 용도(예: 사무실)로 되어 있다면, 관할청에 **'수리점'으로 기재변경(표시변경)**을 신청해 해결할 수 있습니다."
-                })
-            else:
-                legal_actions.append({
-                    "title": "🔧 [정비공장 실무 체크]",
-                    "content": "대기환경보전법 및 소음진동관리법에 따른 인허가 및 배출시설 확인 필수.",
-                    "sub_note": "자동차관련시설 내에서도 기타용도가 '정비공장'인지 '매매장'인지 일치해야 하므로 대장을 꼭 확인하세요."
-                })
+```
 
-        elif "식육포장처리업" in target_biz or "식육가공업" in target_biz or "식품제조·가공업" in target_biz or "금속가공제품 제조업" in target_biz or "인쇄소 및 출판업" in target_biz:
-            if bld_use != "공장":
-                if bld_use == "제2종근린생활시설" and area < 500.0:
-                    warnings.append({
-                        "title": "[제2종근생 소규모 제조업 입점 예외 요건 심사]",
-                        "content": f"현재 주용도가 '제2종근린생활시설'이며 면적({area}㎡)이 500㎡ 미만이므로 예외적으로 소규모 공장 입점이 가능할 수 있습니다. 단, 오폐수·악취 등 환경오염 배출시설 허가 대상인 경우 입주가 원천 불가능합니다.",
-                        "solution": "관할 양산시청 환경부서 및 위생과를 통해 '배출시설 비대상'임을 사전 확인받으세요.",
-                        "sub_note": "💡 **[제조업 기재변경 필수]** 입점이 가시화되더라도 건축물대장 기타용도(세부용도)란에 반드시 **'제조업소'**로 명시되어 있어야 공장등록 및 영업신고가 가능합니다. 만약 일반 사무소 등으로 표기되어 있다면, 배출시설 비대상 확인서를 첨부하여 관할청에 **'제조업소'로 기재변경(표시변경)**을 신청하세요."
-                    })
-                else:
-                    fatal_errors.append({
-                        "title": "[건축법 위반] 제조업/가공업 용도 부적합",
-                        "content": f"해당 제조업·가공업은 주용도가 원칙적으로 **'공장'**이어야 합니다. (현재: {bld_use}, 면적: {area}㎡)",
-                        "solution": "공장 또는 지식산업센터 내 공장 용도로 물건을 완전히 변경해야 합니다.",
-                        "sub_note": None
-                    })
-            else:
-                legal_actions.append({
-                    "title": "🏭 [공장 내 가공 실무 체크]",
-                    "content": "주용도가 '공장'으로 적합합니다. 산집법 및 환경법상 배출시설 허가 여부를 심층 검토하세요.",
-                    "sub_note": "공장 내에서도 세부 업종코드에 따라 기타용도 명시가 필요할 수 있습니다."
-                })
 
-        elif "학원" in target_biz or "직업훈련소" in target_biz:
-            if area >= 500.0 and bld_use not in ["교육연구시설", "제2종근린생활시설(학원)"]:
-                fatal_errors.append({
-                    "title": "[건축법 위반] 대형 학원 용도 부적합",
-                    "content": f"바닥면적 500㎡ 이상 학원은 주용도가 반드시 '교육연구시설'이어야 합니다. (현재: {bld_use}, 면적: {area}㎡)",
-                    "solution": "교육연구시설로 용도변경 필수.",
-                    "sub_note": None
-                })
-            elif area < 500.0 and bld_use not in ["제2종근린생활시설", "교육연구시설"]:
-                fatal_errors.append({
-                    "title": "[건축법 위반] 중소형 학원 용도 부적합",
-                    "content": f"500㎡ 미만 학원은 제2종근린생활시설 또는 교육연구시설이어야 합니다. (현재: {bld_use})",
-                    "solution": "용도변경 필요.",
-                    "sub_note": "💡 **[기재변경 팁]** 현재 2종근생이더라도 기타용도가 '일반음식점' 등으로 되어있더라도 교육청 학원 등록 시 반려될 수 있습니다. 학원 등록 전 기타용도를 **'학원'**으로 기재변경(표시변경) 해두는 것이 원칙입니다."
-                })
-            else:
-                legal_actions.append({
-                    "title": "📚 [학원업 실무 체크]",
-                    "content": "학원의 설립·운영 및 과외교습에 관한 법률에 따른 강의실 면적(통상 60㎡~90㎡ 이상) 및 소방시설(비상구 등) 확인.",
-                    "sub_note": "건축물대장상 기타용도란에 명확히 '학원' 또는 '교습소'로 표기되어 있는지 확인 후, 다를 경우 **표시변경**을 진행하세요."
-                })
 
-        elif "PC방" in target_biz or "노래연습장" in target_biz or "청소년게임제공업" in target_biz or "인형뽑기방" in target_biz:
-            if bld_use not in ["제2종근린생활시설", "문화및집회시설"]:
-                fatal_errors.append({
-                    "title": "[건축법 위반] 게임/오락시설 용도 부적합",
-                    "content": f"PC방, 노래연습장, 게임제공업은 주용도가 반드시 **'제2종근린생활시설'**(또는 문화및집회시설)이어야 합니다. (현재: {bld_use})",
-                    "solution": "제2종근린생활시설로 용도변경을 선행해야 합니다.",
-                    "sub_note": "용도변경 시 기타용도를 명확히 특정해야 합니다."
-                })
-            else:
-                legal_actions.append({
-                    "title": "🕹️ [PC방/게임장 실무 체크포인트]",
-                    "content": "① 학교정화구역 거리 검토 필수, ② 다중이용업소 소방필증 발급 의무 엄수.",
-                    "sub_note": "💡 **[기재변경 팁]** 제2종근린생활시설 내에서도 기타용도란에 '인터넷컴퓨터게임시설제공업' 등 관련 명칭이 명시되어 있지 않은 단순 상가라면, 인허가 부서 요구에 따라 해당 명칭으로 **기재사항 변경(표시변경)**을 신청하여 대장을 깔끔하게 정리하세요."
-                })
+"
+f"📜 **법적 근거:** {yangsan_rule['legal_basis']}
 
-        elif "세탁소" in target_biz:
-            if bld_use != "제1종근린생활시설":
-                fatal_errors.append({
-                    "title": "[건축법 위반] 세탁소 용도 부적합",
-                    "content": f"세탁소(공중위생세탁업)는 주용도가 '제1종근린생활시설'이어야 합니다. (현재: {bld_use})",
-                    "solution": "제1종근생으로 용도변경 필요.",
-                    "sub_note": "용도변경 시 기타용도에 '세탁소' 표기 필수."
-                })
-            else:
-                legal_actions.append({
-                    "title": "👕 [세탁소 실무 체크]",
-                    "content": "드라이클리닝 장비 사용 시 대기배출시설 신고 여부 확인.",
-                    "sub_note": "같은 1종근생 내(예: 소매점)에 있더라도, 위생영업 허가를 위해 관할청에 **기타용도 표시변경**을 통해 '세탁소'로 명시하는 것이 바람직합니다."
-                })
 
-        elif "일반 숙박업" in target_biz or "생활숙박시설(레지던스)" in target_biz or "펜션 및 휴양콘도미니엄" in target_biz:
-            if bld_use != "숙박시설":
-                fatal_errors.append({
-                    "title": "[건축법 위반] 숙박업 관련 용도 부적합",
-                    "content": f"해당 숙박 관련 영업은 주용도가 반드시 **'숙박시설'**이어야 합니다. (현재: {bld_use})",
-                    "solution": "일반 상가나 주택은 숙박시설로 용도변경이 극도로 어려우므로, 처음부터 대장상 주용도가 숙박시설인 물건만 취급하세요.",
-                    "sub_note": "💡 **[세부용도 일치 필수]** 주용도가 숙박시설이라도 기타용도가 '일반숙박시설', '생활숙박시설', '관광숙박시설'로 세분화됩니다. 하시고자 하는 영업(예: 취사 가능한 레지던스 = 생활숙박시설)과 대장상 **기타용도**가 100% 일치해야 하며, 다를 경우 용도변경 수준의 까다로운 절차가 수반될 수 있습니다."
-                })
-            else:
-                legal_actions.append({
-                    "title": "🏨 [숙박시설 실무 체크]",
-                    "content": "공중위생관리법상 영업신고, 소방시설완비증명서 및 위탁운영사 여부 등을 꼼꼼히 확인하세요.",
-                    "sub_note": "건축물대장상 기타용도가 본인이 운영하려는 세부 숙박 카테고리와 정확히 일치하는지 재차 확인하세요."
-                })
 
-        elif "외국인관광 도시민박업" in target_biz:
-            if bld_use not in ["단독/다세대/아파트(주택류)"]:
-                fatal_errors.append({
-                    "title": "[관광진흥법 위반] 도시민박업 주택 요건 부적합",
-                    "content": f"외국인관광 도시민박업은 실제 거주하는 주택(단독·다세대·연립·아파트)에서만 가능합니다. (현재: {bld_use})",
-                    "solution": "건축물대장상 용도가 상가나 오피스텔이 아닌 '주택'인 물건으로 변경하세요.",
-                    "sub_note": "오피스텔은 업무시설이므로 절대 불가합니다."
-                })
-            else:
-                legal_actions.append({
-                    "title": "🏡 [외국인관광 도시민박업 체크]",
-                    "content": "도시민박업 지정 신청 시 소방안전기준 및 거주 요건, 외국어 안내 서비스 구비를 증빙하세요.",
-                    "sub_note": None
-                })
-        
+"
+f"💡 **해결 대안:** 조례 기준 위반이므로 계약 불가, 타 지역 상가 물건을 검토하세요."
+)
+break
+
+```
+    if not matched_ban:
+        if zoning == "중심상업지역":
+            warnings.append(
+                f"**[양산시 조례 크로스 체크]** {yangsan_rule['legal_basis']} "
+                f"(💡 업종 자체는 허용되나 주차장법 대수 및 소방방재 시설 기준을 반드시 현장 실측하세요.)"
+            )
         else:
-            if bld_use not in ["제1종근린생활시설", "제2종근린생활시설", "업무시설", "판매시설", "의료시설", "운동시설", "자원순환관련시설", "창고시설", "위락시설"]:
-                 fatal_errors.append({
-                    "title": f"[건축법 위반] {target_biz} 용도 부적합",
-                    "content": f"해당 업종은 현재 건축물 주용도({bld_use})에 적합하지 않을 확률이 매우 높습니다.",
-                    "solution": "업종에 맞는 적합한 주용도로 용도변경을 선행하세요.",
-                    "sub_note": "근린생활시설로 변경 시 기타용도란에 실제 입점 업종을 명확히 기재하세요."
-                })
-            else:
-                legal_actions.append({
-                    "title": f"✅ [{target_biz} 입점 기본 적합 검토]",
-                    "content": f"입력된 건축물 주용도({bld_use}) 및 면적({area}㎡) 기준 일반적인 법적 요건에 부합합니다. 양산시 조례 및 개별 지침을 최종 확인하세요.",
-                    "sub_note": "💡 **[실무 핵심: 기타용도 일치화]** 주용도가 근린생활시설로 맞더라도, 건축물대장 우측 상단의 **'기타용도(세부용도)'**란에 입점하시려는 업종명(예: 의원, 사무소, 미용업 등)이 텍스트로 정확히 기재되어 있어야 관련 관청의 인허가(영업증 발급 등)가 반려되지 않습니다. 만약 다르게 기재되어 있다면, 동일 시설군 내이므로 쉽게 **'건축물대장 기재사항 변경(표시변경) 신청'**을 통해 세부 용도를 맞춘 뒤 영업신고를 진행하세요."
-                })
+            legal_actions.append(
+                f"**[양산시 도시계획 조례 통과]** '{zoning}' 내 **'{target_biz}'** 입점은 추가 제한에 저촉되지 않습니다. (근거: {yangsan_rule['legal_basis']})"
+            )
 
-    else:
+# 🌟 2-1. [도시계획 + 건축조례 동시교차 검증] 양산시 건축 조례상 높이, 일조권 및 주차장 기준 검토 추가
+if property_type == "상가 / 일반 건축물" and zoning in yangsan_building_ordinance_rules:
+    bld_rule = yangsan_building_ordinance_rules[zoning]
+    legal_actions.append(f"**[양산시 건축 조례 - 높이 및 일조]** {bld_rule['max_height_rule']}")
+    legal_actions.append(f"**[양산시 건축 조례 - 주차장 기준]** {bld_rule['parking_rule']}")
+
+# 3. 학교정화구역 검증 (학교보건법)
+if has_school_zone:
+    if any(kw in target_biz for kw in ["유흥주점", "단란주점", "PC방", "노래연습장", "호텔", "모텔", "당구장", "청소년게임제공업", "인형뽑기방", "무도장", "카지노", "생활숙박시설"]):
+        fatal_errors.append(
+            f"**[학교보건법 제6조 위반]** 학교환경위생정화구역 내에 위치하여 '{target_biz}' 영업이 금지됩니다.
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 절대정화구역은 절대 불가, 상대정화구역은 교육지원청 심의 통과 시에만 허가 가능합니다."
+)
+
+```
+# 4. [건축법 주용도 및 면적 전수 검증] 모든 업종별 건축법 시행령 별표1 정밀 교차 심사
+if property_type == "상가 / 일반 건축물":
+    
+    if "동물위탁관리업" in target_biz:
+        if area >= 300.0 and bld_use != "동물관련시설":
+            fatal_errors.append(
+                f"**[건축법 시행령 별표1 위반]** 면적 300㎡ 이상 동물위탁시설은 주용도가 '동물관련시설'이어야 합니다. (현재: {bld_use}, {area}㎡)
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 건축물 용도변경 허가를 거쳐 주용도를 '동물관련시설'로 변경해야 합니다."
+)
+elif area < 300.0 and bld_use not in ["제2종근린생활시설", "동물관련시설"]:
+fatal_errors.append(
+f"**[건축법 시행령 별표1 위반]** 300㎡ 미만 동물위탁관리업은 주용도가 '제2종근린생활시설'(또는 동물관련시설)이어야 합니다. (현재: {bld_use})
+
+
+
+"
+f"💡 **해결 대안:** 제2종근린생활시설로 용도변경 허가(또는 신고)를 선행해야 합니다."
+)
+else:
+legal_actions.append("**[반려동물 영업 적합]** 건축법상 주용도 및 면적 요건 적합. (동물보호법상 이중문, CCTV, 방음·방취 공사 특약 명시 권장)")
+
+```
+    elif "동물미용업" in target_biz or "동물생산업·판매업" in target_biz:
+        if bld_use not in ["제1종근린생활시설", "제2종근린생활시설", "동물관련시설"]:
+            fatal_errors.append(
+                f"**[건축법 위반]** 동물미용업 및 펫샵은 주용도가 제1·2종근린생활시설 또는 동물관련시설이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 적합한 용도의 건축물로 변경 또는 이전 필요."
+)
+else:
+legal_actions.append("**[동물미용/판매업 체크]** 동물보호법에 따른 시설기준(격리실, 급수시설 등) 준수 필수.")
+
+```
+    elif "일반음식점" in target_biz or "휴게음식점" in target_biz or "제과점" in target_biz:
+        if "300㎡이상" in target_biz and bld_use != "제2종근린생활시설" and bld_use != "판매시설":
+            fatal_errors.append(
+                f"**[건축법 시행령 별표1 위반]** 300㎡ 이상 휴게음식점은 주용도가 '제2종근린생활시설'(또는 판매시설)이어야 합니다. (현재: {bld_use}, {area}㎡)
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 제2종근린생활시설로 용도변경 필수."
+)
+elif bld_use not in ["제1종근린생활시설", "제2종근린생활시설", "판매시설", "숙박시설"]:
+fatal_errors.append(
+f"**[건축법 위반]** 해당 음식·휴게업은 제1·2종 근린생활시설 등에 해당해야 합니다. (현재: {bld_use})
+
+
+
+"
+f"💡 **해결 대안:** 건축물 용도를 제1·2종 근린생활시설로 변경해야 합니다."
+)
+else:
+legal_actions.append("**[음식점 창업 실무 체크]** 식품위생법 위생교육 수령, 지하층 직통계단 설치 여부 및 그리스트랩 설치 확인.")
+
+```
+    elif "식육판매업" in target_biz:
+        if bld_use not in ["제1종근린생활시설", "제2종근린생활시설"]:
+            fatal_errors.append(
+                f"**[건축법 위반]** 식육판매업(정육점 소매)은 주용도가 제1·2종 근린생활시설이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 근린생활시설 용도의 상가로 변경 필요."
+)
+else:
+legal_actions.append("**[식육판매업 체크]** 축산물 위생관리법에 따른 냉장·냉동 쇼케이스 및 소독고 구비 필수.")
+
+```
+    elif "유흥주점" in target_biz or "단란주점" in target_biz or "무도장 및 카지노업소" in target_biz:
+        if bld_use != "위락시설":
+            fatal_errors.append(
+                f"**[건축법 위반]** 유흥·단란주점 및 무도장·카지노는 주용도가 반드시 **'위락시설'**이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 일반 상가에는 위락시설 용도변경이 불가하므로 처음부터 '위락시설'인 건축물이나 상업지역 전용 건물을 선택해야 합니다."
+)
+else:
+legal_actions.append("**[위락시설 실무 체크]** 취득세·재산세 중과세 대상 여부 및 다중이용업소 소방안전시설완비증명서 발급 확인.")
+
+```
+    elif "일반주점·맥주집" in target_biz:
+        if bld_use not in ["제2종근린생활시설", "위락시설", "판매시설"]:
+            fatal_errors.append(
+                f"**[건축법 위반]** 주점 형태 영업은 주용도가 '제2종근린생활시설' 이상이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 제2종근생으로 용도변경 필요."
+)
+else:
+legal_actions.append("**[일반주점 체크]** 식품위생법상 일반음식점 허가 대상이며 청소년 고용 및 주류 판매 규정 준수.")
+
+```
+    elif "식육포장처리업" in target_biz or "식육가공업" in target_biz or "식품제조·가공업" in target_biz or "금속가공제품 제조업" in target_biz or "인쇄소 및 출판업" in target_biz:
         if bld_use != "공장":
-            fatal_errors.append({
-                "title": "[산집법 치명적 결격] 산업단지 건축물 주용도 부적합",
-                "content": f"산업집적활성화 및 공장설립에 관한 법률(산집법)에 따라 산단 내 공장 등록을 위해서는 주용도가 무조건 **'공장'**이어야 합니다. (현재 주용도: {bld_use})",
-                "solution": "다른 공장 물건을 선택해야 합니다. 산단 내에서는 임의 용도변경이 불가합니다.",
-                "sub_note": None
-            })
-        
-        if selected_parcel_row is not None:
-            input_val = target_biz.strip().upper()
-            code_match = input_val in auto_detected_code.upper() or any(c.strip() in input_val for c in auto_detected_code.split(','))
-            name_match = input_val in auto_detected_name.upper() or any(w in auto_detected_name for w in target_biz.split())
-            
-            if target_biz and not code_match and not name_match:
-                fatal_errors.append({
-                    "title": "[산단 관리기본계획 위반] 허용 업종코드 불일치",
-                    "content": f"해당 지번의 한국산업단지공단(KICOX) 관리기본계획상 허용 업종코드(`{auto_detected_code}`)에 임차인 희망 업종('{target_biz}')이 포함되지 않습니다.",
-                    "solution": "해당 지번에서는 입주계약 체결이 불가능합니다. 코드가 맞는 다른 필지를 찾으세요.",
-                    "sub_note": None
-                })
-            else:
-                legal_actions.append({
-                    "title": "✅ [산단 입주계약 적합]",
-                    "content": "한국산업단지공단 관리기본계획상 허용 업종 코드 및 명칭에 부합합니다.",
-                    "sub_note": None
-                })
+            if bld_use == "제2종근린생활시설" and area < 500.0:
+                legal_actions.append(
+                    f"✨ **[핵심 허용 예외 가이드: 2종근생(제조업소) 표시변경 활용]**
 
-    # 탭 구성
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📋 1. 상세 법적 리포트", "💰 2. 원인자부담금", "⚡ 3. 전기용량(승압)", "🧯 4. 소방·환경·위생", "🚽 5. 정화조·오수"
-    ])
+```
 
-    with tab1:
-        st.subheader("📋 공법상 적합성 및 상세 법적 리포트")
-        st.info("💡 **[중개사무소 실무 필독]** 건축물대장상 **주용도**뿐만 아니라 **'기타용도(세부용도)'**의 일치 여부가 실무 인허가에서 매우 중요합니다. 동일한 시설군(예: 2종근생 내)이라도 세부 업종이 다르다면 관할청에 **'건축물대장 기재사항 변경(표시변경)'**을 신청하여 용도를 완벽히 맞추는 것이 사고를 예방하는 지름길입니다.")
-        st.markdown("---")
+
+
+"
+f"현재 건축물대장 주용도가 '제2종근린생활시설'이고 면적이 500㎡ 미만인 경우, 건축물대장의 '기타용도'란에 **'제2종근린생활시설(제조업소)'** 또는 해당 세부 업종명(예: 인쇄업, 식품제조업 등)으로 표시변경(용도변경 허가 없이 건축과에 간단한 표시변경 신청)을 거치면 합법적으로 입점할 수 있습니다!
+
+
+
+"
+f"⚠️ 단, 오폐수·악취 등 환경오염 배출시설 설치 승인 대상인 경우 입주가 불가하므로 관할 지자체 환경부서에 '배출시설 비대상' 확인을 반드시 거치세요."
+)
+else:
+fatal_errors.append(
+f"**[건축법 위반]** 해당 제조업·가공업은 주용도가 원칙적으로 '공장'이어야 합니다. (현재: {bld_use}, {area}㎡)
+
+
+
+"
+f"💡 **해결 대안:** 500㎡ 미만 제2종근생 상가로 구하거나 공장 용도로 변경해야 합니다."
+)
+else:
+legal_actions.append("**[공장 내 가공 실무 체크]** 주용도가 '공장'으로 적합합니다. 산집법 및 환경법상 배출시설 허가 여부를 검토하세요.")
+
+```
+    elif "냉장·냉동창고" in target_biz or "일반 물류창고" in target_biz:
+        if bld_use != "창고시설":
+            fatal_errors.append(
+                f"**[건축법 위반]** 창고업 및 물류센터는 주용도가 반드시 **'창고시설'**이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 주용도를 '창고시설'로 변경하거나 전용 창고 건물을 계약해야 합니다."
+)
+else:
+legal_actions.append("**[창고업 실무 체크]** 1톤 이상 화물차 진출입 도로 조건 및 바닥 적재 하중 확인.")
+
+```
+    elif "고물상 및 폐기물재활용시설" in target_biz:
+        if bld_use != "자원순환관련시설":
+            fatal_errors.append(
+                f"**[건축법 위반]** 고물상 및 폐기물 관련 시설은 주용도가 반드시 **'자원순환관련시설'**이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 자원순환관련시설로 허가된 부지 및 건물로만 이전해야 합니다."
+)
+else:
+legal_actions.append("**[자원순환시설 체크]** 폐기물관리법에 따른 허가 및 야적장 펜스 설치 요건 확인.")
+
+```
+    elif "병원" in target_biz or "종합병원" in target_biz or "요양병원" in target_biz or "정신병원" in target_biz:
+        if bld_use != "의료시설":
+            fatal_errors.append(
+                f"**[건축법 위반]** 병원급 의료기관은 주용도가 반드시 **'의료시설'**이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 의료시설로 용도변경이 가능한지 건축사 통해 확인 필요."
+)
+else:
+legal_actions.append("**[의료시설 체크]** 의료법에 따른 병상 간격, 소방시설(스프링클러 등) 엄격 기준 충족 필수.")
+
+```
+    elif "일반의원·소아과·내과" in target_biz or "치과의원" in target_biz or "한의원" in target_biz:
+        if bld_use not in ["제1종근린생활시설", "의료시설"]:
+            fatal_errors.append(
+                f"**[건축법 위반]** 의원급 의료기관은 주용도가 제1종근린생활시설 또는 의료시설이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 제1종근린생활시설로 용도변경 선행."
+)
+else:
+legal_actions.append("**[의원급 체크]** 의료법에 따른 진료실 및 소독시설 구비.")
+
+```
+    elif "동물병원" in target_biz:
+        if bld_use not in ["제2종근린생활시설", "동물관련시설", "의료시설"]:
+            fatal_errors.append(
+                f"**[건축법 위반]** 동물병원은 주용도가 제2종근린생활시설, 동물관련시설 또는 의료시설이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 제2종근린생활시설 등으로 용도변경 필요."
+)
+else:
+legal_actions.append("**[동물병원 체크]** 수의사법에 따른 진료실 및 X-ray 방사선 방어벽 설치 확인.")
+
+```
+    elif "피트니스" in target_biz or "헬스장" in target_biz or "수영장" in target_biz or "볼링장" in target_biz:
+        if area >= 500.0 and bld_use != "운동시설":
+            fatal_errors.append(
+                f"**[건축법 시행령 별표1 위반]** 500㎡ 이상 운동시설은 주용도가 반드시 **'운동시설'**이어야 합니다. (현재: {bld_use}, {area}㎡)
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 건축물대장 주용도를 '운동시설'로 변경하는 용도변경 절차 필수."
+)
+elif area < 500.0 and bld_use not in ["제2종근린생활시설", "운동시설"]:
+fatal_errors.append(
+f"**[건축법 위반]** 500㎡ 미만 체력단련장은 주용도가 제2종근린생활시설 또는 운동시설이어야 합니다. (현재: {bld_use})
+
+
+
+"
+f"💡 **해결 대안:** 제2종근생으로 용도변경 필요."
+)
+else:
+legal_actions.append("**[운동시설 실무 체크]** 슬래브 바닥 하중 안전성 검토(건축구조기술사 확인) 및 방진·방음 매트 시공 조건 확인.")
+
+```
+    elif "스크린골프장" in target_biz or "당구장" in target_biz:
+        if bld_use not in ["제2종근린생활시설", "운동시설"]:
+            fatal_errors.append(
+                f"**[건축법 위반]** 스크린골프장 및 당구장은 주용도가 제2종근린생활시설 또는 운동시설이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 제2종근생으로 용도변경 필요."
+)
+else:
+legal_actions.append("**[스크린골프/당구장 체크]** 층고 높이(보통 3m 이상) 및 방음 시공 확인.")
+
+```
+    elif "학원" in target_biz or "직업훈련소" in target_biz:
+        if area >= 500.0 and bld_use not in ["교육연구시설", "제2종근린생활시설(학원)"]:
+            fatal_errors.append(
+                f"**[건축법 위반]** 500㎡ 이상 학원은 주용도가 '교육연구시설'이어야 합니다. (현재: {bld_use}, {area}㎡)
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 교육연구시설로 용도변경 필수."
+)
+elif area < 500.0 and bld_use not in ["제2종근린생활시설", "교육연구시설"]:
+fatal_errors.append(
+f"**[건축법 위반]** 500㎡ 미만 학원은 제2종근린생활시설 또는 교육연구시설이어야 합니다. (현재: {bld_use})
+
+
+
+"
+f"💡 **해결 대안:** 용도변경 필요."
+)
+else:
+legal_actions.append("**[학원업 체크]** 학원법에 따른 강의실 면적 및 소방시설(비상구 등) 확인.")
+
+```
+    elif "독서실" in target_biz or "스터디카페" in target_biz:
+        if bld_use not in ["제2종근린생활시설", "교육연구시설"]:
+            fatal_errors.append(
+                f"**[건축법 위반]** 독서실 및 스터디카페는 제2종근린생활시설 또는 교육연구시설이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 용도변경 필요."
+)
+else:
+legal_actions.append("**[독서실/스카 체크]** 소방안전시설완비증명서 및 소음 방지 설비 확인.")
+
+```
+    elif "PC방" in target_biz or "노래연습장" in target_biz or "청소년게임제공업" in target_biz or "인형뽑기방" in target_biz:
+        if bld_use not in ["제2종근린생활시설", "문화및집회시설"]:
+            fatal_errors.append(
+                f"**[건축법 위반]** PC방, 노래연습장, 게임제공업은 주용도가 반드시 **'제2종근린생활시설'**(또는 문화및집회시설)이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 제2종근린생활시설로 용도변경을 선행해야 합니다."
+)
+else:
+legal_actions.append("**[PC방/게임장 실무 체크]** ① 학교정화구역 거리 검토 필수, ② 다중이용업소 소방필증 발급 의무.")
+
+```
+    elif "세차장" in target_biz:
+        if bld_use not in ["자동차관련시설"]:
+            fatal_errors.append(
+                f"**[건축법 위반]** 세차장은 주용도가 반드시 **'자동차관련시설'**이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 건축물 용도를 자동차관련시설로 변경하고 폐수배출시설 승인을 받아야 합니다."
+)
+else:
+legal_actions.append("**[세차장 실무 체크]** 오수 정화시설, 유수분리기 설치 여부 및 하수도법상 폐수배출시설 신고 필수.")
+
+```
+    elif "자동차정비공장" in target_biz or "자동차매매장" in target_biz:
+        if bld_use != "자동차관련시설":
+            # 기타용도 예외 규정 안내 추가
+            legal_actions.append(
+                f"✨ **[기타용도 예외 허가 규정 안내: 카센터 및 수리점]**
+
+```
+
+
+
+"
+f"만약 건축물대장 주용도가 '제2종근린생활시설'일지라도, 기타용도란에 **'수리점'** 또는 '제2종근린생활시설 (수리점)'과 같이 구체적인 세부 용도가 기재되어 있거나 표시변경이 되어 있는 경우 카센터(자동차정비) 영업이 합법적으로 가능한 경우가 많습니다!
+
+
+
+"
+f"⚠️ 단, 주용도가 일반 상가(오피스 등)이거나 자동차관련시설이 아닐 경우 대기환경보전법 및 건축법상 정비업 등록에 제한이 따르므로 관할 지자체 차량등록부서에 기타용도 기재 내용을 확인하세요."
+)
+fatal_errors.append(
+f"**[건축법 위반 주의]** 카센터 및 자동차정비·매매장은 원칙적으로 주용도가 '자동차관련시설'이어야 합니다. (현재: {bld_use})
+
+
+
+"
+f"💡 **해결 대안:** 기타용도란에 '수리점' 기재 여부를 확인하거나 자동차관련시설로 변경하세요."
+)
+else:
+legal_actions.append("**[정비공장 체크]** 대기환경보전법 및 소음진동관리법에 따른 인허가 확인.")
+
+```
+    elif "일반 숙박업" in target_biz:
+        if bld_use != "숙박시설":
+            fatal_errors.append(
+                f"**[건축법 위반]** 일반숙박업은 주용도가 반드시 **'숙박시설'**이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 일반 상가나 주택은 숙박시설 용도변경이 불가하므로 처음부터 '숙박시설'인 물건을 선택해야 합니다."
+)
+else:
+legal_actions.append("**[숙박업 체크]** 공중위생관리법상 숙박업 영업신고 및 소방시설완비증명서 필수.")
+
+```
+    elif "생활숙박시설(레지던스)" in target_biz:
+        if bld_use != "숙박시설":
+            fatal_errors.append(
+                f"**[건축법 위반]** 생활숙박시설은 주용도가 반드시 **'숙박시설'**이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 오피스텔이나 일반 주택/상가는 생활숙박시설로 용도변경이 금지되므로 주용도가 '숙박시설'로 허가된 물건만 취득 가능합니다."
+)
+else:
+warnings.append("⚠️ **[주거용 사용 규제 주의]** 생활숙박시설은 숙박업 신고 후 운영해야 하며, 불법 주거용 사용 시 이행강제금 부과 대상입니다.")
+legal_actions.append("**[생활숙박시설 체크]** 위탁운영사 계약 여부 및 주차장·소방시설 적합 여부 확인.")
+
+```
+    elif "오피스텔 에어비앤비" in target_biz:
+        fatal_errors.append(
+            "**[형사 처벌 대상 / 불법 영업]** 오피스텔은 '업무시설'이므로 공중위생관리법상 숙박업 합법 등록이 원천 불가능합니다.
+
+```
+
+
+
+"
+"💡 **해결 대안:** '생활숙박시설'이거나 '외국인관광 도시민박업' 등록이 가능한 주택 물건으로 계약하셔야 합니다."
+)
+
+```
+    elif "외국인관광 도시민박업" in target_biz:
+        if bld_use not in ["단독/다세대/아파트(주택류)"]:
+            fatal_errors.append(
+                f"**[관광진흥법 위반]** 외국인관광 도시민박업은 실제 거주하는 주택(단독·다세대·연립·아파트)에서만 가능합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 건축물대장상 용도가 주택인 물건으로 한정됩니다."
+)
+else:
+legal_actions.append("**[도시민박업 체크]** 도시민박업 지정 신청, 소방안전기준 및 외국어 안내 서비스 구비.")
+
+```
+    elif "펜션 및 휴양콘도미니엄" in target_biz:
+        if bld_use != "숙박시설":
+            fatal_errors.append(
+                f"**[건축법 위반]** 펜션 및 휴양콘도미니엄은 주용도가 **'숙박시설'**(또는 농어촌민박 요건)이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 일반 상가 등은 불가하며 해당 용도가 허용되는 부지 및 건축물이어야 합니다."
+)
+else:
+warnings.append("⚠️ **[개별 인허가법 주의]** 건축법상 숙박시설 외에도 **'농어촌정비법'**(농어촌민박업) 또는 **'관광진흥법'**에 따른 별도 등록 요건을 충족해야 합니다.")
+legal_actions.append("**[펜션/콘도 체크]** 하수처리구역 외 지역인 경우 개인 오수처리시설 용량 및 방류수 수질 검토 필수.")
+
+```
+    elif "일반미용업·헤어샵" in target_biz or "네일아트 및 피부미용실" in target_biz:
+        if bld_use not in ["제1종근린생활시설", "제2종근린생활시설"]:
+            fatal_errors.append(
+                f"**[건축법 위반]** 미용업은 주용도가 제1·2종 근린생활시설이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 근린생활시설로 용도변경 필요."
+)
+else:
+legal_actions.append("**[미용업 체크]** 공중위생관리법에 따른 면허증 보유 및 소독 장비 구비.")
+
+```
+    elif "목욕장업" in target_biz:
+        if bld_use != "제2종근린생활시설":
+            fatal_errors.append(
+                f"**[건축법 시행령 별표1 위반]** 대중목욕탕 및 사우나는 주용도가 반드시 **'제2종근린생활시설'**이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 제2종근린생활시설 상가로 변경 필수."
+)
+else:
+legal_actions.append("**[목욕장업 체크]** 수질검사 성적서, 보일러실 안전검사 및 대형 정화조 용량 확보 필수.")
+
+```
+    elif "세탁소" in target_biz:
+        if bld_use != "제1종근린생활시설":
+            fatal_errors.append(
+                f"**[건축법 위반]** 세탁소는 주용도가 '제1종근린생활시설'이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 제1종근생 용도변경 필요."
+)
+else:
+legal_actions.append("**[세탁소 체크]** 드라이클리닝 장비 사용 시 대기배출시설 신고 여부 확인.")
+
+```
+    elif "공인중개사사무소" in target_biz or "일반 법무사·행정사·세무사 사무소" in target_biz or "일반 기업체 오피스" in target_biz:
+        if bld_use not in ["제2종근린생활시설", "업무시설"]:
+            fatal_errors.append(
+                f"**[건축법 위반]** 일반 사무소는 주용도가 제2종근린생활시설 또는 업무시설이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 제2종근생 또는 업무시설로 용도변경 선행."
+)
+else:
+legal_actions.append("**[오피스 입점 적합]** 건축법상 사무소 용도에 부합합니다. 간판 설치 규정 및 통신설비 확인.")
+
+```
+    elif "금융업소" in target_biz:
+        if bld_use not in ["제1종근린생활시설", "제2종근린생활시설", "업무시설"]:
+            fatal_errors.append(
+                f"**[건축법 위반]** 금융업소는 제1·2종 근린생활시설 또는 업무시설이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 용도변경 필요."
+)
+else:
+legal_actions.append("**[금융업소 체크]** ATM 코너 설치 시 바닥 하중 및 보안시설 확인.")
+
+```
+    else:
+        legal_actions.append(f"**[{target_biz} 적합성 검토]** 입력된 건축물 주용도({bld_use}) 및 면적({area}㎡) 기준 일반 요건에 부합합니다.")
+
+else: # 산업단지 내 공장
+    if bld_use != "공장":
+        fatal_errors.append(
+            f"**[치명적 결격]** 산단 내 공장 등록을 위해서는 주용도가 무조건 **'공장'**이어야 합니다. (현재: {bld_use})
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 다른 공장 물건을 선택해야 합니다."
+)
+
+```
+    if selected_parcel_row is not None:
+        input_val = target_biz.strip().upper()
+        code_match = input_val in auto_detected_code.upper() or any(c.strip() in input_val for c in auto_detected_code.split(','))
+        name_match = input_val in auto_detected_name.upper() or any(w in auto_detected_name for w in target_biz.split())
         
-        if fatal_errors:
-            st.markdown("### ❌ [계약 불가 / 중개사고 고위험 사유]")
-            for err in fatal_errors:
-                with st.container():
-                    st.error(f"🚨 **{err['title']}**\n\n{err['content']}")
-                    st.markdown(f"💡 **해결 대안:** {err['solution']}")
-                    if err.get('sub_note'):
-                        st.info(f"🔎 **기타용도 / 기재변경 실무 팁:** {err['sub_note']}")
-                    st.markdown("---")
-        if warnings:
-    st.markdown("### ⚠️ [주의 및 필수 검토 사항]")
-    for w in warnings:
+        if target_biz and not code_match and not name_match:
+            fatal_errors.append(
+                f"**[산단 관리기본계획 위반]** 해당 지번의 허용 업종코드(`{auto_detected_code}`)에 임차인 희망 업종('{target_biz}')이 포함되지 않습니다.
+
+```
+
+
+
+"
+f"💡 **해결 대안:** 해당 지번에서는 입주계약 체결이 불가능합니다."
+)
+else:
+legal_actions.append("**[산단 입주계약 적합]** 한국산업단지공단 관리기본계획상 허용 업종 코드 및 명칭에 부합합니다.")
+
+```
+# 탭 구성
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📋 1. 상세 법적 리포트", "💰 2. 원인자부담금", "⚡ 3. 전기용량(승압)", "🧯 4. 소방·환경·위생", "🚽 5. 정화조·오수"
+])
+
+with tab1:
+    st.subheader("📋 공법상 적합성 및 상세 법적 리포트")
+    
+    # 🌟 눈에 깔끔하게 들어오도록 UI 구조 대폭 개선 (Expander 및 전용 카드 박스 활용)
+    if fatal_errors:
         with st.container():
-            st.warning(f"**{w['title']}**\n\n{w['content']}")
-            if w.get('solution'):
-                st.markdown(f"💡 **해결 대안:** {w['solution']}")
-            if w.get('sub_note'):
-                st.info(f"🔎 **기타용도 / 기재변경 실무 팁:** {w['sub_note']}")
-            st.markdown("---")
-                if legal_actions:
-        st.markdown("### 🛠️ [실무 법적 조치 및 상세 가이드]")
-        for act in legal_actions:
-            with st.expander(f"📌 {act['title']}", expanded=True):
-                st.write(act['content'])
-                if act.get('sub_note'):
-                    st.info(f"🔎 **기타용도 / 기재변경 실무 팁:** {act['sub_note']}")
+            st.error("### ❌ [계약 절대 금지 / 중개사고 고위험 사유]")
+            for idx, err in enumerate(fatal_errors, 1):
+                st.markdown(f"**{idx}.** {err}")
+                st.markdown("")
+    else:
+        st.success("### ✅ [공법상 입주 및 영업 기본 요건 적합]")
+
+    if warnings:
+        st.markdown("---")
+        with st.container():
+            st.warning("### ⚠️ [주의 및 필수 검토 사항]")
+            for idx, w in enumerate(warnings, 1):
+                st.markdown(f"**{idx}.** {w}")
+                st.markdown("")
+
+    if legal_actions:
+        st.markdown("---")
+        with st.container():
+            st.info("### 🛠️ [실무 법적 조치 및 상세 가이드 (표시변경·기타용도 예외 규정 포함)]")
+            for idx, act in enumerate(legal_actions, 1):
+                st.markdown(f"**{idx}.** {act}")
+                st.markdown("---")
 
 with tab2:
     st.subheader("💰 상하수도 원인자부담금 시뮬레이션")
@@ -712,3 +1072,9 @@ with tab5:
         st.warning("⚠️ 오수 발생량이 많거나 수질오염 유발 시설이므로, 건물 정화조 인용 초과 여부를 관리사무소에 반드시 확인하세요.")
     else:
         st.success("✅ 정화조 오수 부담 안정적")
+
+```
+
+```
+
+```
