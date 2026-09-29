@@ -613,7 +613,8 @@ if submitted:
                     st.markdown(f"💡 **해결 대안:** {err['solution']}")
                     if err.get('sub_note'):
                         st.info(f"🔎 **기타용도 / 기재변경 실무 팁:** {err['sub_note']}")
-                    st.markdown("if warnings:
+                    st.markdown("---")
+                    if warnings:
         st.markdown("### ⚠️ [주의 및 필수 검토 사항]")
         for w in warnings:
             with st.container():
@@ -622,7 +623,8 @@ if submitted:
                     st.markdown(f"💡 **해결 대안:** {w['solution']}")
                 if w.get('sub_note'):
                     st.info(f"🔎 **기타용도 / 기재변경 실무 팁:** {w['sub_note']}")
-                st.markdown("if legal_actions:
+                st.markdown("---")
+                if legal_actions:
         st.markdown("### 🛠️ [실무 법적 조치 및 상세 가이드]")
         for act in legal_actions:
             with st.expander(f"📌 {act['title']}", expanded=True):
