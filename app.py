@@ -71,7 +71,7 @@ zoning_restrictions = {
     "계획관리지역": {"prohibited": ["위락시설", "무도장", "카지노"]}
 }
 
-# 🌟 [업종 연동형 개편] 양산시 도시계획 조례 및 건축 조례 기반 용도지역별 세부 업종 교차 진단 데이터베이스
+# 🌟 양산시 도시계획 조례 및 건축 조례 기반 용도지역별 세부 업종 교차 진단 데이터베이스
 yangsan_ordinance_rules = {
     "제1종전용주거지역": {
         "additional_prohibited": ["음식점", "카페", "제과점", "골프연습장", "안마시술소", "학원", "PC방", "노래연습장", "사무소", "식육판매업", "미용업", "세탁소", "동물위탁관리업", "동물미용업", "공인중개사", "병원", "의원"],
@@ -316,17 +316,17 @@ if submitted:
         for p in prohibited_list:
             if p in target_biz or p in biz_category or (p == "위락시설" and target_biz in ["무도장 및 카지노업소", "유흥주점 (룸살롱·클럽 - 위락시설)", "단란주점"]):
                 fatal_errors.append(
-                    f"**[국토계획법 제76조 및 동법 시행령 별표]** '{zoning}' 지역에서는 국토의 계획 및 이용에 관한 법률에 따라 "
-                    f"**'{target_biz}'**의 입점 및 영업이 법적으로 원천 금지되어 있습니다.
+                    f"[국토계획법 제76조 및 동법 시행령 별표] '{zoning}' 지역에서는 국토의 계획 및 이용에 관한 법률에 따라 "
+                    f"'{target_biz}'의 입점 및 영업이 법적으로 원천 금지되어 있습니다. "
+                    f"💡 **해결 대안:** 해당 용도지역 내에서는 허용되지 않으므로, 상업지역 등 해당 업종이 허용되는 다른 입지로 물건을 변경해야 합니다."
+                )
 
     # 🌟 2. [업종 연동형 정밀 교차 체크] 양산시 도시계획 조례 기반 세부 업종별 규제 진단
     if property_type == "상가 / 일반 건축물" and zoning in yangsan_ordinance_rules:
         yangsan_rule = yangsan_ordinance_rules[zoning]
         
-        # 사용자가 선택한 세부 업종과 양산시 추가 금지 업종 키워드 전수 매칭
         matched_ban = False
         for add_p in yangsan_rule["additional_prohibited"]:
-            # 업종 명칭이나 대분류에 금지 키워드가 포함되어 있는지 정밀 대조
             if add_p in target_biz or add_p in biz_category or any(kw in target_biz for kw in add_p.split()):
                 matched_ban = True
                 fatal_errors.append(
@@ -337,7 +337,6 @@ if submitted:
                 )
                 break
         
-        # 금지 업종에 걸리지 않은 경우, 해당 조례 기준에 따른 적합 안내 및 실무 가이드 제공
         if not matched_ban:
             if zoning == "중심상업지역":
                 warnings.append(
@@ -693,17 +692,34 @@ if submitted:
 
     with tab1:
         st.subheader("📋 공법상 적합성 및 상세 법적 리포트")
+        
+        # ❌ 결격/위반 사유 카드 디자인 적용
         if fatal_errors:
-            st.error("### ❌ [계약 절대 금지 / 중개사고 고위험 사유]")
-            for err in fatal_errors: st.markdown(f"- **{err}**")
+            st.error("🚨 **[계약 절대 금지 / 중개사고 고위험 사유]**")
+            for i, err in enumerate(fatal_errors, 1):
+                with st.container(border=True):
+                    st.markdown(f"**결격 사유 {i}**")
+                    st.markdown(err)
         else:
-            st.success("### ✅ [공법상 입주 및 영업 기본 요건 적합]")
+            st.success("✅ **[공법상 입주 및 영업 기본 요건 적합]** 치명적인 결격 사유가 발견되지 않았습니다.")
+            
+        # ⚠️ 주의 사항 카드 디자인 적용
         if warnings:
-            st.warning("### ⚠️ [주의 및 필수 검토]")
-            for w in warnings: st.markdown(f"- {w}")
+            st.markdown("")
+            st.warning("⚠️ **[주의 및 필수 검토 사항]**")
+            for i, w in enumerate(warnings, 1):
+                with st.container(border=True):
+                    st.markdown(f"**주의 사항 {i}**")
+                    st.markdown(w)
+                    
+        # 🛠️ 실무 법적 조치 카드 디자인 적용
         if legal_actions:
-            st.markdown("### 🛠️ [실무 법적 조치 및 상세 가이드]")
-            for act in legal_actions: st.markdown(f"- {act}")
+            st.markdown("")
+            st.info("🛠️ **[실무 법적 조치 및 상세 가이드]**")
+            for i, act in enumerate(legal_actions, 1):
+                with st.container(border=True):
+                    st.markdown(f"**실무 가이드 {i}**")
+                    st.markdown(act)
 
     with tab2:
         st.subheader("💰 상하수도 원인자부담금 시뮬레이션")
