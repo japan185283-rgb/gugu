@@ -10,7 +10,7 @@ st.markdown("""
 
 """, unsafe_allow_html=True)
 
-st.title("🛡️ 부동산 전 업종 완벽 통합 법적 진단 시뮬레이터 Pro")
+st.title("🛡️️ 부동산 전 업종 완벽 통합 법적 진단 시뮬레이터 Pro")
 st.markdown("국토계획법, 건축법, 학교보건법, 양산시 도시계획/건축 조례 및 개별 인허가법 기반의 전수 크로스 체크 규제 진단 툴")
 
 st.markdown("---")
@@ -255,9 +255,9 @@ if property_type == "산업단지 내 공장 (지번 조회)":
             auto_detected_name = str(selected_parcel_row.get(name_col, ''))
             st.success(f"🎯 **[지번 매칭 완료]** `{sel_addr}` (허용 업종코드: {auto_detected_code})")
         else:
-            st.warning("⚠️️ 일치하는 지번이 없습니다. 검색어를 다시 확인해주세요.")
+            st.warning("⚠ 일치하는 지번이 없습니다. 검색어를 다시 확인해주세요.")
     else:
-        st.warning("⚠️ 산단 데이터 파일이 로드되지 않았습니다.")
+        st.warning("⚠️️ 산단 데이터 파일이 로드되지 않았습니다.")
 
 st.markdown("---")
 st.subheader("🎯 3. 임차인 희망 업종 및 설비 조건 선택")
@@ -281,7 +281,7 @@ comprehensive_biz_dict = {
     "🏥 병의원 및 의료시설": [
         "병원", "치과의원", "한의원", "요양병원", "동물병원"
     ],
-    "🏋️ 스포츠, 레저 및 운동시설": [
+    "🏋️️ 스포츠, 레저 및 운동시설": [
         "피트니스·헬스장", "스크린골프장", "당구장", "수영장 및 볼링장"
     ],
     "📚 교육, 연구 및 청소년시설": [
@@ -374,7 +374,7 @@ if submitted:
     # 4. [건축법 주용도 및 면적 유연성 예외 규정 반영 종합 진단]
     if property_type == "상가 / 일반 건축물":
         
-        # 4-1. 세탁소 진단 (면적 500㎡ 미만인 경우 제1종 근생 외에 건축물대장 세부용도/기타용도 표기변경 안내 제공)
+        # 4-1. 세탁소 진단
         if "세탁소" in target_biz:
             if bld_use != "제1종근린생활시설":
                 warnings.append(
