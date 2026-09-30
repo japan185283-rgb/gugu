@@ -31,6 +31,30 @@ else:
     else:
         st.info(f"💡 폴더 내에 `{DEFAULT_CSV_NAME}` 파일이 없습니다. 공장/산단 진단을 원하시면 파일을 업로드하거나 해당 이름으로 폴더에 넣어주세요.")
 
+# 📐 [추가 기능] 지구단위계획 상세 규제 CSV 파일 자동 로드 (사용자 수동 기입 부담 완화)
+district_dfs = {}
+district_files = {
+    "designation": "TN_DSTPLAN_DESIGNATION.csv",
+    "nonuse": "TN_DSTPLAN_NONUSE.csv",
+    "permission": "TN_DSTPLAN_PERMISSION.csv",
+    "scale": "TN_DSTPLAN_SCALE.csv"
+}
+
+for key, filename in district_files.items():
+    if os.path.exists(filename):
+        try:
+            # 인코딩 자동 대응 (cp949 / utf-8)
+            try:
+                district_dfs[key] = pd.read_csv(filename, encoding="cp949")
+            except:
+                district_dfs[key] = pd.read_csv(filename, encoding="utf-8")
+            district_dfs[key].columns = district_dfs[key].columns.str.strip()
+        except Exception as e:
+            pass
+
+if district_dfs:
+    st.success(f"✅ **[지구단위계획 상세 규제 데이터 자동 연동 완료]** (로드된 규제 데이터 테이블: {list(district_dfs.keys())})")
+
 # 건축물대장 주용도 데이터베이스 (직관적인 표준 대분류 체계 유지)
 general_building_uses = [
     "제1종근린생활시설",
@@ -206,17 +230,34 @@ st.subheader("📝 2. 대상 부동산 기본 팩트 입력")
 property_type = st.radio("중개 대상물 형태 선택", ["상가 / 일반 건축물", "산업단지 내 공장 (지번 조회)"])
 zoning = st.selectbox("토지 용도지역 (국토계획법)", list(zoning_restrictions.keys()))
 
-# 🔍 [1번 보완 사항] 지구단위계획 상세 규제 항목 추가
-st.markdown("#### 📐 지구단위계획구역 상세 규제 설정")
+# 🔍 [지구단위계획 상세 규제 자동 연동 옵션]
+st.markdown("#### 📐 지구단위계획구역 상세 규제 설정 (CSV 자동 연동)")
 has_district_unit_plan = st.checkbox("대상 물건이 택지지구·산업단지 등 **'지구단위계획구역'** 내에 위치합니까?", value=False)
+
 district_prohibited_input = ""
 district_allowed_input = ""
-if has_district_unit_plan:
-    col_d1, col_d2 = st.columns(2)
-    with col_d1:
-        district_prohibited_input = st.text_input("🚫 지구단위계획상 **불허(금지) 업종** (쉼표로 구분)", placeholder="예: 안마시술소, 단란주점, 숙박시설")
-    with col_d2:
-        district_allowed_input = st.text_input("✅ 지구단위계획상 **허용/지정 업종** (선택 입력)", placeholder="예: 근린생활시설, 교육연구시설")
+
+# CSV 데이터가 로드되어 있다면 자동으로 지구명 목록 추출 및 선택 기능 제공
+selected_district_name = ""
+if has_district_unit_plan and district_dfs:
+    st.info("📂 자동 연동된 지구단위계획 데이터를 기반으로 구역/지구명을 선택하거나 검색할 수 있습니다.")
+    # designation 테이블에서 지구명(DESCRIPT 또는 USE_EXPLANATION) 추출 시도
+    desig_df = district_dfs.get("designation")
+    if desig_df is not None and 'DESCRIPT' in desig_df.columns:
+        district_names = desig_df['DESCRIPT.dropna()'].unique().tolist() if 'DESCRIPT' in desig_df.columns else []
+        # 대안 컬럼 확인
+        if not district_names and 'USE_EXPLANATION' in desig_df.columns:
+            district_names = desig_df['USE_EXPLANATION'].dropna().unique().tolist()
+        
+        if district_names:
+            selected_district_name = st.selectbox("📍 대상 지구단위계획구역 선택", district_names)
+
+# 수동 입력 칸도 원본 그대로 유지 (직접 키워드 보완 입력 가능)
+col_d1, col_d2 = st.columns(2)
+with col_d1:
+    district_prohibited_input = st.text_input("🚫 지구단위계획상 **불허(금지) 업종** (쉼표로 구분)", placeholder="예: 안마시술소, 단란주점, 숙박시설")
+with col_d2:
+    district_allowed_input = st.text_input("✅ 지구단위계획상 **허용/지정 업종** (선택 입력)", placeholder="예: 근린생활시설, 교육연구시설")
 
 bld_use = st.selectbox("건축물대장 주용도 (건축법 시행령 별표1)", general_building_uses)
 
@@ -288,7 +329,7 @@ comprehensive_biz_dict = {
     "🏥 병의원 및 의료시설": [
         "병원", "치과의원", "한의원", "요양병원", "동물병원"
     ],
-    "🏋️ 스포츠, 레저 및 운동시설": [
+    "🏋️️ 스포츠, 레저 및 운동시설": [
         "피트니스·헬스장", "스크린골프장", "당구장", "수영장 및 볼링장"
     ],
     "📚 교육, 연구 및 청소년시설": [
@@ -332,8 +373,25 @@ if submitted:
                     f"💡 **해결 대안:** 해당 용도지역 내에서는 허용되지 않으므로, 상업지역 등 해당 업종이 허용되는 다른 입지로 물건을 변경해야 합니다."
                 )
 
-    # 1-1. [1번 보완 사항] 지구단위계획 상세 규제 교차 진단 로직
+    # 1-1. 지구단위계획 상세 규제 교차 진단 로직 (CSV 자동 연동 결과 반영)
     if property_type == "상가 / 일반 건축물" and has_district_unit_plan:
+        # CSV 파일 내 불허/허용 데이터 자동 탐색 반영
+        csv_auto_banned_matched = False
+        if district_dfs:
+            # nonuse(불허용도) 테이블 검사
+            nonuse_df = district_dfs.get("nonuse")
+            if nonuse_df is not None and 'USE_EXPLANATION' in nonuse_df.columns:
+                for idx, row in nonuse_df.iterrows():
+                    exp = str(row.get('USE_EXPLANATION', ''))
+                    if any(kw in target_biz for kw in exp.split('∩') if len(kw) > 1):
+                        csv_auto_banned_matched = True
+                        fatal_errors.append(
+                            f"[지구단위계획 CSV 자동 연동 규제 위반] 업로드된 지구단위계획 불허용도 DB에 따르면, "
+                            f"선택하신 '{target_biz}' 업종이 해당 구역 내 **불허 용도 규정**에 저촉됩니다. "
+                            f"📜 **규제 설명:** {exp[:100]}..."
+                        )
+                        break
+
         if district_prohibited_input.strip():
             banned_keywords = [b.strip() for b in district_prohibited_input.split(",") if b.strip()]
             matched_district_ban = False
@@ -346,9 +404,9 @@ if submitted:
                         f"💡 **해결 대안:** 국토계획법상 용도지역 조례를 충족하더라도 **지구단위계획이 최우선 적용**되므로 이 구역에서는 영업이 불가합니다. 타 구역 물건을 검토하세요."
                     )
                     break
-            if not matched_district_ban:
+            if not matched_district_ban and not csv_auto_banned_matched:
                 legal_actions.append(
-                    f"📐 **[지구단위계획 불허 업종 검토 통과]** 입력하신 지구단위계획 불허 업종 목록에 '{target_biz}' 관련 명시적 제한 키워드가 저촉되지 않습니다."
+                    f"📐 **[지구단위계획 불허 업종 검토 통과]** 입력하신 지구단위계획 불허 업종 목록 및 연동된 DB에 '{target_biz}' 관련 명시적 제한 키워드가 저촉되지 않습니다."
                 )
         
         if district_allowed_input.strip():
@@ -742,7 +800,7 @@ if submitted:
             st.markdown("---")
             
         if warnings:
-            st.warning("### ⚠️️ [주의 및 필수 검토 / 용도변경·표시변경 합법화 대안 가이드]")
+            st.warning("### ⚠ [주의 및 필수 검토 / 용도변경·표시변경 합법화 대안 가이드]")
             for w in warnings: 
                 st.markdown(f"- {w}")
             st.markdown("---")
