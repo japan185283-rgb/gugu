@@ -205,6 +205,19 @@ st.subheader("📝 2. 대상 부동산 기본 팩트 입력")
 
 property_type = st.radio("중개 대상물 형태 선택", ["상가 / 일반 건축물", "산업단지 내 공장 (지번 조회)"])
 zoning = st.selectbox("토지 용도지역 (국토계획법)", list(zoning_restrictions.keys()))
+
+# 🔍 [1번 보완 사항] 지구단위계획 상세 규제 항목 추가
+st.markdown("#### 📐 지구단위계획구역 상세 규제 설정")
+has_district_unit_plan = st.checkbox("대상 물건이 택지지구·산업단지 등 **'지구단위계획구역'** 내에 위치합니까?", value=False)
+district_prohibited_input = ""
+district_allowed_input = ""
+if has_district_unit_plan:
+    col_d1, col_d2 = st.columns(2)
+    with col_d1:
+        district_prohibited_input = st.text_input("🚫 지구단위계획상 **불허(금지) 업종** (쉼표로 구분)", placeholder="예: 안마시술소, 단란주점, 숙박시설")
+    with col_d2:
+        district_allowed_input = st.text_input("✅ 지구단위계획상 **허용/지정 업종** (선택 입력)", placeholder="예: 근린생활시설, 교육연구시설")
+
 bld_use = st.selectbox("건축물대장 주용도 (건축법 시행령 별표1)", general_building_uses)
 
 col_f1, col_f2 = st.columns(2)
@@ -260,7 +273,7 @@ comprehensive_biz_dict = {
     "🐶 반려동물 관련 영업": [
         "동물위탁관리업", "동물미용업", "동물생산업·판매업", "동물장묘업 및 동물병원"
     ],
-    "🍽️️ 일반 음식점 및 카페·디저트": [
+    "🍽 일반 음식점 및 카페·디저트": [
         "일반음식점", "휴게음식점", "제과점 및 아이스크림 전문점", "식육판매업"
     ],
     "🍺 주점 및 유흥·위락": [
@@ -319,6 +332,37 @@ if submitted:
                     f"💡 **해결 대안:** 해당 용도지역 내에서는 허용되지 않으므로, 상업지역 등 해당 업종이 허용되는 다른 입지로 물건을 변경해야 합니다."
                 )
 
+    # 1-1. [1번 보완 사항] 지구단위계획 상세 규제 교차 진단 로직
+    if property_type == "상가 / 일반 건축물" and has_district_unit_plan:
+        if district_prohibited_input.strip():
+            banned_keywords = [b.strip() for b in district_prohibited_input.split(",") if b.strip()]
+            matched_district_ban = False
+            for bk in banned_keywords:
+                if bk in target_biz or bk in biz_category or any(bk in w for w in target_biz.split()):
+                    matched_district_ban = True
+                    fatal_errors.append(
+                        f"[지구단위계획 규제 위반 / 계약 절대금지] 본 물건지는 택지지구·산단 등의 **지구단위계획구역**에 해당하며, "
+                        f"지구단위계획상 **금지(불허)된 업종('{bk}')**에 임차인의 희망 업종('{target_biz}')이 저촉됩니다. "
+                        f"💡 **해결 대안:** 국토계획법상 용도지역 조례를 충족하더라도 **지구단위계획이 최우선 적용**되므로 이 구역에서는 영업이 불가합니다. 타 구역 물건을 검토하세요."
+                    )
+                    break
+            if not matched_district_ban:
+                legal_actions.append(
+                    f"📐 **[지구단위계획 불허 업종 검토 통과]** 입력하신 지구단위계획 불허 업종 목록에 '{target_biz}' 관련 명시적 제한 키워드가 저촉되지 않습니다."
+                )
+        
+        if district_allowed_input.strip():
+            allowed_keywords = [a.strip() for a in district_allowed_input.split(",") if a.strip()]
+            matched_district_allow = any(ak in target_biz or ak in biz_category for ak in allowed_keywords)
+            if not matched_district_allow:
+                warnings.append(
+                    f"⚠️ **[지구단위계획 허용·지정용도 확인 권장]** 본 구역의 허용/지정용도(' {district_allowed_input} ')와 임차인 희망 업종('{target_biz}') 간 연관성이 명확하지 않습니다. 관할 지자체 지구단위계획 지침 원본을 최종 확인하세요."
+                )
+            else:
+                legal_actions.append(
+                    f"✅ **[지구단위계획 허용 용도 부합]** 지구단위계획상 지정/허용 용도 기준에 부합합니다."
+                )
+
     # 2. 양산시 도시계획 조례 교차 진단
     if property_type == "상가 / 일반 건축물" and zoning in yangsan_ordinance_rules:
         yangsan_rule = yangsan_ordinance_rules[zoning]
@@ -343,7 +387,7 @@ if submitted:
                 )
             else:
                 legal_actions.append(
-                    f"🏛️️ **[양산시 도시계획 조례 교차 검증 통과]** '{zoning}' 지역 내에서 **'{target_biz}'** 입점은 양산시 도시계획 조례상 추가 제한 규정에 저촉되지 않으며 법적 근거가 확보됩니다. "
+                    f"🏛 **[양산시 도시계획 조례 교차 검증 통과]** '{zoning}' 지역 내에서 **'{target_biz}'** 입점은 양산시 도시계획 조례상 추가 제한 규정에 저촉되지 않으며 법적 근거가 확보됩니다. "
                     f"(기준 근거: {yangsan_rule['legal_basis']})"
                 )
 
@@ -698,7 +742,7 @@ if submitted:
             st.markdown("---")
             
         if warnings:
-            st.warning("### ⚠️ [주의 및 필수 검토 / 용도변경·표시변경 합법화 대안 가이드]")
+            st.warning("### ⚠️️ [주의 및 필수 검토 / 용도변경·표시변경 합법화 대안 가이드]")
             for w in warnings: 
                 st.markdown(f"- {w}")
             st.markdown("---")
