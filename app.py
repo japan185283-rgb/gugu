@@ -3,10 +3,10 @@ import pandas as pd
 import os
 
 # 1. 페이지 기본 설정
-st.set_page_config(page_title="부동산 전 업종 완벽 통합 진단 시뮬레이터 Pro v2", layout="centered")
+st.set_page_config(page_title="부동산 전 업종 완벽 통합 진단 시뮬레이터 Pro v3", layout="centered")
 
-st.title("🛡️ 부동산 전 업종 완벽 통합 법적 진단 시뮬레이터 Pro v2")
-st.markdown("양산시 도시계획/건축 조례, 지구단위계획 DB, 산단 필지 자동 매칭 및 실시간 검색 기반 진단 툴")
+st.title("🛡️ 부동산 전 업종 완벽 통합 법적 진단 시뮬레이터 Pro v3")
+st.markdown("양산시 도시계획/건축 조례, 주요 지구단위계획 및 산단 맞춤형 실무 진단 툴")
 
 st.markdown("---")
 
@@ -20,26 +20,6 @@ if os.path.exists(DEFAULT_CSV_NAME):
         df_parcels.columns = df_parcels.columns.str.strip()
     except Exception as e:
         pass
-
-# 📐 지구단위계획 상세 규제 CSV 자동 로드
-district_dfs = {}
-district_files = {
-    "designation": "TN_DSTPLAN_DESIGNATION.csv",
-    "nonuse": "TN_DSTPLAN_NONUSE.csv",
-    "permission": "TN_DSTPLAN_PERMISSION.csv",
-    "scale": "TN_DSTPLAN_SCALE.csv"
-}
-
-for key, filename in district_files.items():
-    if os.path.exists(filename):
-        try:
-            try:
-                district_dfs[key] = pd.read_csv(filename, encoding="cp949")
-            except:
-                district_dfs[key] = pd.read_csv(filename, encoding="utf-8")
-            district_dfs[key].columns = district_dfs[key].columns.str.strip()
-        except:
-            pass
 
 # 건축물대장 주용도 데이터베이스
 general_building_uses = [
@@ -65,6 +45,30 @@ zoning_restrictions = {
     "보전녹지지역": {"prohibited": ["근린생활시설", "공장", "제조업", "숙박업", "음식점", "창고시설", "위락시설"]},
     "자연녹지지역": {"prohibited": ["숙박업", "공장(일부제한)", "위락시설"]},
     "계획관리지역": {"prohibited": ["위락시설"]}
+}
+
+# 양산시 대표 지구단위계획구역별 맞춤 규제 데이터베이스 (실무형 자동 매칭)
+yangsan_district_presets = {
+    "해당 없음 (일반 지역)": {
+        "prohibited": "",
+        "allowed": "국토계획법 및 조례에 따름"
+    },
+    "양산 물금택지개발지구 (근린상업/준주거)": {
+        "prohibited": "단란주점, 유흥주점, 안마시술소, 숙박시설(일부 블록), 대형창고, 고물상",
+        "allowed": "제1·2종근린생활시설, 교육연구시설, 업무시설, 운동시설, 판매시설"
+    },
+    "양산 사송공공주택지구 (상업용지/근린생활)": {
+        "prohibited": "유흥주점, 단란주점, 안마시술소, 숙박시설, 공장, 위험물저장및처리시설",
+        "allowed": "제1·2종근린생활시설, 의료시설, 교육연구시설, 노유자시설"
+    },
+    "양산 어곡/산막 일반산업단지 (지원시설/공장)": {
+        "prohibited": "주거시설, 숙박시설, 위락시설, 학교, 일반음식점(일부 공장용지 내 제한)",
+        "allowed": "공장, 제조업, 창고시설, 지원시설(지식산업센터 및 근린생활시설 일부)"
+    },
+    "웅상 소주/주진 지구단위계획구역": {
+        "prohibited": "단란주점, 유흥주점, 공해유발 공장, 숙박시설(주거인접지)",
+        "allowed": "제1·2종근린생활시설, 판매시설, 업무시설"
+    }
 }
 
 # 양산시 도시계획 조례 세부 업종 교차 진단 데이터베이스
@@ -104,7 +108,6 @@ yangsan_ordinance_rules = {
     "계획관리지역": {"additional_prohibited": ["숙박시설", "위락시설"], "legal_basis": "공장 및 제조업소 입주 시 배출시설 기준 적용"}
 }
 
-# 양산시 건축 조례 검토 데이터
 yangsan_building_ordinance_rules = {
     "제1종전용주거지역": {"max_height_rule": "인접 대지경계선 및 도로와의 관계에 따른 일조권 확보 높이 제한 엄격", "parking_rule": "조례에 따른 강화된 주차장 설치 기준 적용"},
     "제2종전용주거지역": {"max_height_rule": "정북 방향 일조권 및 높이 제한 엄격 적용", "parking_rule": "가구당 법정 주차 대수 준수 필수"},
@@ -125,74 +128,31 @@ yangsan_building_ordinance_rules = {
 
 st.markdown("---")
 
-# 3. 대상 부동산 기본 팩트 입력 (검색 기능 강화)
+# 3. 대상 부동산 기본 팩트 입력
 st.subheader("📝 1. 대상 부동산 기본 팩트 및 위치 설정")
 
 property_type = st.radio("중개 대상물 형태 선택", ["상가 / 일반 건축물", "산업단지 내 공장 (지번 조회)"])
 zoning = st.selectbox("토지 용도지역 (국토계획법)", list(zoning_restrictions.keys()))
 
-# 📐 지구단위계획 자동 연동 및 실시간 검색 섹션
-st.markdown("#### 📐 지구단위계획구역 상세 규제 자동 연동 (검색 지원)")
-has_district_unit_plan = st.checkbox("대상 물건이 택지지구·산업단지 등 **'지구단위계획구역'** 내에 위치합니까?", value=False)
+# 📐 양산시 실무 맞춤형 지구단위계획 선택창
+st.markdown("#### 📐 양산시 주요 지구단위계획구역 선택 (자동 규제 매칭)")
+selected_district = st.selectbox("진단할 지구단위계획구역 선택", list(yangsan_district_presets.keys()))
 
-auto_pulled_nonuse = ""
-auto_pulled_allow = ""
-selected_district_name = ""
+# 선택된 지구에 따른 기본값 불러오기
+preset_info = yangsan_district_presets[selected_district]
 
-if has_district_unit_plan and district_dfs:
-    desig_df = district_dfs.get("designation")
-    if desig_df is not None:
-        # 검색 가능한 지구명 리스트 추출
-        col_candidates = ['DESCRIPT', 'USE_EXPLANATION', 'DISTRICT_NAME', 'NAME']
-        target_col = None
-        for cc in col_candidates:
-            if cc in desig_df.columns:
-                target_col = cc
-                break
-        
-        if target_col:
-            district_names = desig_df[target_col].dropna().astype(str).unique().tolist()
-            
-            # 실시간 검색 입력창 추가
-            search_district_kw = st.text_input("🔍 지구명 / 구역명 실시간 검색", placeholder="예: 물금, 소주, 산단 등 입력")
-            if search_district_kw:
-                filtered_dnames = [d for d in district_names if search_district_kw in d]
-            else:
-                filtered_dnames = district_names
-            
-            if filtered_dnames:
-                selected_district_name = st.selectbox("📍 검색된 지구단위계획구역 선택", filtered_dnames)
-                
-                # 선택된 구역에 해당하는 불허용도 데이터 자동 추출
-                nonuse_df = district_dfs.get("nonuse")
-                if nonuse_df is not None:
-                    matched_nonuse_rows = nonuse_df[nonuse_df.astype(str).apply(lambda x: x.str.contains(selected_district_name, na=False)).any(axis=1)]
-                    if not matched_nonuse_rows.empty:
-                        # 불허용도 설명 텍스트 결합
-                        exp_col = 'USE_EXPLANATION' if 'USE_EXPLANATION' in matched_nonuse_rows.columns else matched_nonuse_rows.columns[1]
-                        auto_pulled_nonuse = ", ".join(matched_nonuse_rows[exp_col].dropna().astype(str).unique().tolist())
-                
-                # 허용용도 데이터 자동 추출
-                perm_df = district_dfs.get("permission")
-                if perm_df is not None:
-                    matched_perm_rows = perm_df[perm_df.astype(str).apply(lambda x: x.str.contains(selected_district_name, na=False)).any(axis=1)]
-                    if not matched_perm_rows.empty:
-                        p_col = 'PERMIT_EXPLANATION' if 'PERMIT_EXPLANATION' in matched_perm_rows.columns else matched_perm_rows.columns[1]
-                        auto_pulled_allow = ", ".join(matched_perm_rows[p_col].dropna().astype(str).unique().tolist())
-
-# 자동 연동된 불허/허용 업종을 입력창에 반영 (수정 가능하도록 세팅)
 col_d1, col_d2 = st.columns(2)
 with col_d1:
     district_prohibited_input = st.text_input(
-        "🚫 지구단위계획상 **불허(금지) 업종** (자동 연동됨)", 
-        value=auto_pulled_nonuse,
-        placeholder="구역을 선택하면 자동으로 채워집니다"
+        "🚫 지구단위계획상 **불허(금지) 업종** (수정 가능)", 
+        value=preset_info["prohibited"],
+        placeholder="예: 단란주점, 유흥주점 등"
     )
 with col_d2:
     district_allowed_input = st.text_input(
-        "✅ 지구단위계획상 **허용/지정 업종** (자동 연동됨)", 
-        value=auto_pulled_allow,
-        placeholder="구역을 선택하면 자동으로 채워집니다"
+        "✅ 지구단위계획상 **허용/지정 업종** (수정 가능)", 
+        value=preset_info["allowed"],
+        placeholder="예: 제1·2종근린생활시설 등"
     )
 
 bld_use = st.selectbox("건축물대장 주용도 (건축법 시행령 별표1)", general_building_uses)
@@ -282,26 +242,16 @@ if submitted:
                     f"[국토계획법 제76조] '{zoning}' 지역에서는 국토계획법에 따라 '{target_biz}'의 입점 및 영업이 원천 금지되어 있습니다."
                 )
 
-    # 2. 지구단위계획 불허/허용 자동 크로스 체크 진단
-    if property_type == "상가 / 일반 건축물" and has_district_unit_plan:
+    # 2. 지구단위계획 불허/허용 검증
+    if property_type == "상가 / 일반 건축물" and selected_district != "해당 없음 (일반 지역)":
         if district_prohibited_input.strip():
             banned_keywords = [b.strip() for b in district_prohibited_input.split(",") if b.strip()]
             for bk in banned_keywords:
-                if len(bk) > 1 and (bk in target_biz or bk in target_biz or any(bk in w for w in target_biz.split()) or any(w in bk for w in target_biz.split())):
+                if len(bk) > 1 and (bk in target_biz or any(bk in w for w in target_biz.split()) or any(w in bk for w in target_biz.split())):
                     fatal_errors.append(
-                        f"[지구단위계획 불허용도 저촉 위반] 선택하신 구역의 지구단위계획 불허/금지 업종 규정에 '{target_biz}'(관련 키워드: {bk})가 포함되어 있습니다. 본 구역에서는 영업이 불가합니다."
+                        f"[지구단위계획 불허용도 저촉 위반] 선택하신 구역('{selected_district}')의 불허 업종 규정에 '{target_biz}'(관련 규제: {bk})가 포함되어 있어 영업이 불가합니다."
                     )
                     break
-        
-        if district_allowed_input.strip():
-            allowed_keywords = [a.strip() for a in district_allowed_input.split(",") if a.strip()]
-            matched_allow = any(ak in target_biz or target_biz in ak for ak in allowed_keywords if len(ak) > 1)
-            if allowed_keywords and not matched_allow:
-                warnings.append(
-                    f"⚠️ **[지구단위계획 지정용도 불일치 경고]** 본 구역의 허용·지정용도 목록에 '{target_biz}'가 명시적으로 포함되어 있지 않습니다. 관할 지자체 허가과 사전 확인이 필수적입니다."
-                )
-            else:
-                legal_actions.append(f"✅ **[지구단위계획 허용용도 부합]** 지구단위계획상 지정 및 허용 용도 기준에 부합합니다.")
 
     # 3. 양산시 도시계획 조례 교차 진단
     if property_type == "상가 / 일반 건축물" and zoning in yangsan_ordinance_rules:
@@ -315,7 +265,7 @@ if submitted:
                 )
                 break
         if not matched_ban:
-            legal_actions.append(f"🏛 **[양산시 도시계획 조례 통과]** '{zoning}' 지역 내 '{target_biz}' 입점은 양산시 조례 추가 제한에 저촉되지 않습니다.")
+            legal_actions.append(f"🏛 **[양산시 도시계획 조례 통과]** '{zoning}' 지역 내 '{target_biz}' 입점은 조례 추가 제한에 저촉되지 않습니다.")
 
     # 4. 양산시 건축 조례 검토
     if property_type == "상가 / 일반 건축물" and zoning in yangsan_building_ordinance_rules:
