@@ -1,4 +1,3 @@
-import streamlit as mp_st
 import streamlit as st
 import pandas as pd
 import os
@@ -228,72 +227,127 @@ with col_addr1:
 with col_addr2:
     floor_num = st.number_input("건물 층수 (지하층 음수)", min_value=-5, max_value=50, value=1, key="main_floor_num")
 
-# 세션 상태 초기화 (용도지역과 주용도를 독립적으로 분리)
+# 세션 상태 초기화
 if 'detected_zoning' not in st.session_state:
     st.session_state.detected_zoning = "제2종일반주거지역"
-if 'detected_other_use' not in st.session_state:
-    st.session_state.detected_other_use = "제1종근린생활시설 (소매점), 부설주차장"
 
-# API 연동 및 지번 분석 자동 조회 버튼
-if st.button("🔍 지번 및 토지이용규제 자동 조회 (API 연동)", key="api_lookup_btn"):
+# -----------------------------------------------------------------------------
+# 🎯 [카카오맵 API + 정부 공공데이터 API 정밀 연동 로직]
+# -----------------------------------------------------------------------------
+if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 (API 연동)", key="api_lookup_btn"):
     if not input_jibun:
         st.warning("⚠ 조회할 지번을 입력해주세요.")
     else:
-        with st.spinner("카카오맵 API 및 공공데이터 API를 조회 중입니다..."):
+        with st.spinner("카카오맵 API로 주소를 정제하고 공공데이터 포털 API를 조회 중입니다..."):
             try:
-                # 📍 [카카오맵 REST API 연동 (주소 -> 좌표 변환 및 지도 표시)]
+                # Step 1: 카카오맵 API를 통해 정확한 지번, 법정동코드, PNU 추출
                 url = "https://dapi.kakao.com/v2/local/search/address.json"
                 headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
                 params = {"query": input_jibun}
                 
-                kakao_res = requests.get(url, headers=headers, params=params)
-                if kakao_res.status_code == 200:
-                    kakao_data = kakao_res.json()
-                    if kakao_data.get('documents'):
-                        doc = kakao_data['documents'][0]
-                        exact_address = doc.get('address_name', '')
-                        lat = float(doc['y'])
-                        lon = float(doc['x'])
-                        
-                        st.success(f"📍 **카카오맵 주소 매칭 완료:** {exact_address}")
-                        
-                        # 스트림릿 내장 st.map()을 활용해 위도/경도 표시
-                        map_df = pd.DataFrame({'lat': [lat], 'lon': [lon]})
-                        st.map(map_df, zoom=16)
-                    else:
-                        st.warning("⚠️ 카카오맵 API에서 정확한 주소를 찾을 수 없습니다. 지번을 구체적으로 입력해주세요.")
-                else:
-                    st.error("⚠️ 카카오맵 API 통신 오류가 발생했습니다. (API 키 유효성 또는 네트워크 확인 필요)")
+                kakao_res = requests.get(url, headers=headers, params=params, timeout=5)
                 
-                # --- 기존 토지이용규제 용도지역 판별 로직 ---
-                jibun_lower = input_jibun.replace(" ", "")
-                
-                if any(kw in jibun_lower for kw in ["중심상업", "중심", "터미널", "중부동상업"]):
-                    new_zone = "중심상업지역"
-                elif any(kw in jibun_lower for kw in ["일반상업", "상평", "명륜", "중앙", "상업", "상가", "중부동"]):
-                    new_zone = "일반상업지역"
-                elif any(kw in jibun_lower for kw in ["근린상업", "근상"]):
-                    new_zone = "근린상업지역"
-                elif any(kw in jibun_lower for kw in ["공업", "어곡", "산막", "소주", "덕계", "매곡"]):
-                    new_zone = "일반공업지역"
-                elif any(kw in jibun_lower for kw in ["준주거", "물금", "범어", "증산"]):
-                    new_zone = "준주거지역"
-                elif any(kw in jibun_lower for kw in ["녹지", "상북", "하북", "원동"]):
-                    new_zone = "자연녹지지역"
-                elif any(kw in jibun_lower for kw in ["계획관리", "관리"]):
-                    new_zone = "계획관리지역"
-                else:
-                    if floor_num >= 5:
-                        new_zone = "제3종일반주거지역"
-                    else:
-                        new_zone = "제2종일반주거지역"
-                
-                st.session_state.detected_zoning = new_zone
-                st.session_state["main_zoning_select"] = new_zone
+                if kakao_res.status_code == 200 and kakao_res.json().get('documents'):
+                    doc = kakao_res.json()['documents'][0]
+                    exact_address = doc.get('address_name', '')
+                    lat = float(doc['y'])
+                    lon = float(doc['x'])
+                    
+                    st.success(f"📍 **카카오맵 주소 정제 완료:** {exact_address}")
+                    st.map(pd.DataFrame({'lat': [lat], 'lon': [lon]}), zoom=16)
 
-                st.success(f"✅ 토지 용도지역 자동 감지 완료! [감지된 용도지역: {new_zone}] (※ 건축물대장 주용도는 아래에서 실제 대장과 일치하는 항목을 자유롭게 선택하세요)")
+                    # 카카오맵 응답에서 PNU 고유 코드 구성요소 추출
+                    address_info = doc.get('address', {})
+                    b_code = address_info.get('b_code', '')              # 10자리 법정동코드
+                    mountain_yn = address_info.get('mountain_yn', 'N')   # 산 여부
+                    san_code = '2' if mountain_yn == 'Y' else '1'
+                    main_no = address_info.get('main_address_no', '0').zfill(4)
+                    sub_no = address_info.get('sub_address_no', '0').zfill(4)
+                    
+                    pnu = f"{b_code}{san_code}{main_no}{sub_no}"          # 19자리 PNU
+                    
+                    sigungu_cd = b_code[:5]
+                    bjdong_cd = b_code[5:]
+                    plat_gb_cd = '1' if mountain_yn == 'Y' else '0'
+
+                    # Step 2: 공공데이터포털 건축물대장 API (표제부) 실제 주용도 조회
+                    bld_api_url = "http://apis.data.go.kr/1613000/BldRnService_v2/getBrTitleInfo"
+                    bld_params = {
+                        'serviceKey': requests.utils.unquote(BUILDING_API_KEY),
+                        'sigunguCd': sigungu_cd,
+                        'bjdongCd': bjdong_cd,
+                        'platGbCd': plat_gb_cd,
+                        'bun': main_no,
+                        'ji': sub_no,
+                        'numOfRows': '5',
+                        'pageNo': '1'
+                    }
+                    
+                    bld_res = requests.get(bld_api_url, params=bld_params, timeout=5)
+                    real_main_purp = ""
+                    if bld_res.status_code == 200:
+                        try:
+                            root = ET.fromstring(bld_res.content)
+                            items = root.findall('.//item')
+                            if items:
+                                main_purp_elem = items[0].find('mainPurpsCdNm')
+                                if main_purp_elem is not None and main_purp_elem.text:
+                                    real_main_purp = main_purp_elem.text.strip()
+                        except Exception:
+                            pass
+
+                    # Step 3: 공공데이터포털 토지이용계획 API 실제 용도지역 조회
+                    land_api_url = "http://apis.data.go.kr/1611000/nsdi/LandUseService/attr/getLandUseAttr"
+                    land_params = {
+                        'serviceKey': requests.utils.unquote(LAND_API_KEY),
+                        'pnu': pnu,
+                        'format': 'json',
+                        'numOfRows': '10',
+                        'pageNo': '1'
+                    }
+                    
+                    real_zoning = ""
+                    try:
+                        land_res = requests.get(land_api_url, params=land_params, timeout=5)
+                        if land_res.status_code == 200:
+                            land_json = land_res.json()
+                            field_list = land_json.get('landUses', {}).get('field', [])
+                            for field in field_list:
+                                prpos_area_nm = field.get('prposAreaDstrcCodeNm', '')
+                                for z_opt in zoning_options:
+                                    if z_opt in prpos_area_nm:
+                                        real_zoning = z_opt
+                                        break
+                                if real_zoning:
+                                    break
+                    except Exception:
+                        pass
+
+                    # Step 4: 결과 자동 매칭 및 드롭다운 동기화
+                    if real_zoning:
+                        st.session_state["main_zoning_select"] = real_zoning
+                        st.success(f"✅ **[실제 토지이용계획 API 조회]** 용도지역: `{real_zoning}`")
+                    else:
+                        st.info("💡 공공데이터 API 조회 불가/미등록 지역이므로 용도지역 목록에서 직접 선택해주세요.")
+
+                    if real_main_purp:
+                        matched_bld = None
+                        for b_use in general_building_uses:
+                            if b_use in real_main_purp or real_main_purp in b_use:
+                                matched_bld = b_use
+                                break
+                        if matched_bld:
+                            st.session_state["main_bld_use_select"] = matched_bld
+                            st.success(f"✅ **[실제 건축물대장 API 조회]** 주용도: `{matched_bld}` ({real_main_purp})")
+                        else:
+                            st.info(f"📋 **[실제 건축물대장 주용도]**: `{real_main_purp}` (아래 목록에서 가장 가까운 항목 선택)")
+                    else:
+                        st.info("💡 대장 미등록 필지 또는 공공데이터 API 응답 지연으로 주용도를 수동 선택해주세요.")
+
+                else:
+                    st.error("⚠️ 카카오맵 API에서 지번을 찾을 수 없습니다. 정확한 지번(예: 양산시 중부동 410)을 입력하세요.")
             except Exception as e:
-                st.error(f"API 연동 중 오류가 발생했습니다: {e}")
+                st.error(f"API 연동 및 데이터 조회 중 오류가 발생했습니다: {e}")
 
 # 선택 박스: 용도지역과 건축물대장 주용도를 각각 독립적으로 선택 가능하도록 배치
 st.markdown("---")
@@ -481,9 +535,8 @@ if submitted:
                 f"💡 **해결 대안:** 절대정화구역인 경우 영업이 절대 불가능하며, 상대정화구역인 경우 관할 양산교육지원청 학교환경위생정화위원회 심의를 통과해야만 허가 가능합니다."
             )
 
-    # 4. [건축법 주용도 및 면적별 합법화 대안 및 표시변경 스마트 진단 로직]
+    # 4. 건축법 주용도 및 면적별 진단 로직
     if property_type == "상가 / 일반 건축물":
-        
         if "세탁소" in target_biz:
             if bld_use != "제1종근린생활시설":
                 warnings.append(
@@ -850,7 +903,7 @@ if submitted:
             st.markdown(f"- **하수도원인자부담금:** 약 **{est_sewage_fee:,.0f} 원** *(10톤 이상 전량 부과 대상)*")
         else:
             st.markdown("- **하수도원인자부담금:** ✅ **면제 대상** *(10톤 미만)*")
-        st.info("💡 양산시 수도조례에 따라 실제 부과 금액은 상이할 수 정 있습니다.")
+        st.info("💡 양산시 수도조례에 따라 실제 부과 금액은 상이할 수 있습니다.")
 
     with tab3:
         st.subheader("⚡ 현실적인 계약전력 및 승압 진단")
@@ -880,7 +933,7 @@ if submitted:
         st.markdown(f"- **업종별 현실적 권장 소요전력:** 약 `{req_power:.1f} kW` (상가/사무소 표준 부하 산정 기준)")
 
         if power_diff > 0:
-            st.warning(f"⚠️️ **[승압 필요]** 현재 전력보다 약 `{power_diff:.1f} kW`의 추가 전력이 필요합니다.")
+            st.warning(f"⚠ **[승압 필요]** 현재 전력보다 약 `{power_diff:.1f} kW`의 추가 전력이 필요합니다.")
             st.markdown(f"- **예상 한전 표준시설부담금(참고용):** 약 **{est_electric_fee:,.0f} 원** *(한전 불입금 별도)*")
         else:
             st.success("✅ **[전기 용량 충분]** 현재 계약전력으로 정상적인 영업 가동이 가능합니다.")
