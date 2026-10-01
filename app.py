@@ -218,14 +218,14 @@ st.markdown("---")
 # 3. 대상 부동산 기본 팩트 입력 (지번 및 층수 입력 기반 자동 연동 구조)
 st.subheader("📝 2. 대상 부동산 기본 팩트 및 지번 입력")
 
-property_type = st.radio("중개 대상물 형태 선택", ["상가 / 일반 건축물", "산업단지 내 공장 (지번 조회)"])
+property_type = st.radio("중개 대상물 형태 선택", ["상가 / 일반 건축물", "산업단지 내 공장 (지번 조회)"], key="main_property_type_radio")
 
 # 지번 및 층수 입력 필드
 col_addr1, col_addr2 = st.columns([2, 1])
 with col_addr1:
-    input_jibun = st.text_input("📍 대상 건물 지번 입력 (예: 경상남도 양산시 중부동 410 또는 물금읍 범어리)", placeholder="전체 주소 또는 지번을 입력하세요")
+    input_jibun = st.text_input("📍 대상 건물 지번 입력 (예: 경상남도 양산시 중부동 410 또는 물금읍 범어리)", placeholder="전체 주소 또는 지번을 입력하세요", key="main_input_jibun")
 with col_addr2:
-    floor_num = st.number_input("건물 층수 (지하층 음수)", min_value=-5, max_value=50, value=1)
+    floor_num = st.number_input("건물 층수 (지하층 음수)", min_value=-5, max_value=50, value=1, key="main_floor_num")
 
 # 세션 상태 초기화 (자동 조회 결과 저장용)
 if 'detected_zoning' not in st.session_state:
@@ -234,7 +234,7 @@ if 'detected_bld_use' not in st.session_state:
     st.session_state.detected_bld_use = "제2종근린생활시설"
 
 # API 연동 및 지번 분석 자동 조회 버튼
-if st.button("🔍 지번 및 건축물 정보 자동 조회 (API 연동)"):
+if st.button("🔍 지번 및 건축물 정보 자동 조회 (API 연동)", key="api_lookup_btn"):
     if not input_jibun:
         st.warning("⚠ 조회할 지번을 입력해주세요.")
     else:
@@ -280,20 +280,22 @@ with col_z1:
     zoning = st.selectbox(
         "토지 용도지역 (자동 감지 또는 수동 선택)", 
         zoning_options, 
-        index=zoning_options.index(st.session_state.detected_zoning) if st.session_state.detected_zoning in zoning_options else 3
+        index=zoning_options.index(st.session_state.detected_zoning) if st.session_state.detected_zoning in zoning_options else 3,
+        key="main_zoning_select"
     )
 with col_z2:
     bld_use = st.selectbox(
         "건축물대장 주용도 (자동 감지 또는 수동 선택)", 
         general_building_uses, 
-        index=general_building_uses.index(st.session_state.detected_bld_use) if st.session_state.detected_bld_use in general_building_uses else 1
+        index=general_building_uses.index(st.session_state.detected_bld_use) if st.session_state.detected_bld_use in general_building_uses else 1,
+        key="main_bld_use_select"
     )
 
 col_f1, col_f2 = st.columns(2)
 with col_f1:
-    area = st.number_input("바닥면적 / 전용면적 (㎡)", min_value=0.0, value=100.0, help="해당 업종이 실제로 사용할 면적")
+    area = st.number_input("바닥면적 / 전용면적 (㎡)", min_value=0.0, value=100.0, help="해당 업종이 실제로 사용할 면적", key="main_area_input")
 with col_f2:
-    has_school_zone = st.checkbox("🎓 학교환경위생정화구역 저촉 여부", value=False)
+    has_school_zone = st.checkbox("🎓 학교환경위생정화구역 저촉 여부", value=False, key="main_school_zone_check")
 
 # 산단 지번별 자동 조회 변수
 selected_parcel_row = None
@@ -307,20 +309,33 @@ if property_type == "산업단지 내 공장 (지번 조회)":
         jibun_col = '지번' if '지번' in df_parcels.columns else df_parcels.columns[0]
         road_col = '도로명' if '도로명' in df_parcels.columns else df_parcels.columns[1] if len(df_parcels.columns) > 1 else jibun_col
 
-        search_kw = st.text_input("🔍 산단 내 지번 또는 도로명 검색", placeholder="예: 어곡동 865-23 또는 865")
-        if search_kw:
-            clean_kw = search_kw.replace(" ", "")
+        # 검색어 세션 상태 초기화 및 관리 (검색어 변경 시 잔류 데이터 방지)
+        if 'ind_search_kw' not in st.session_state:
+            st.session_state.ind_search_kw = ""
+
+        search_kw = st.text_input("🔍 산단 내 지번 또는 도로명 검색", placeholder="예: 어곡동 865-23 또는 865", key="ind_search_input_field")
+        
+        if search_kw != st.session_state.ind_search_kw:
+            st.session_state.ind_search_kw = search_kw
+
+        clean_kw = search_kw.replace(" ", "")
+        
+        # NaN 및 타입 오류 방지를 위한 안전한 문자열 변환
+        s_jibun = df_parcels[jibun_col].fillna('').astype(str).str.replace(" ", "")
+        s_road = df_parcels[road_col].fillna('').astype(str).str.replace(" ", "")
+
+        if clean_kw:
             f_df = df_parcels[
-                df_parcels[jibun_col].astype(str).str.replace(" ", "").str.contains(clean_kw, na=False) | 
-                df_parcels[road_col].astype(str).str.replace(" ", "").str.contains(clean_kw, na=False)
+                s_jibun.str.contains(clean_kw, na=False) | 
+                s_road.str.contains(clean_kw, na=False)
             ]
         else:
             f_df = df_parcels
         
         if len(f_df) > 0:
-            parcel_options = f_df[jibun_col].astype(str).tolist()
-            sel_addr = st.selectbox("조회된 필지(지번) 선택", parcel_options)
-            selected_parcel_row = f_df[f_df[jibun_col].astype(str) == sel_addr].iloc[0]
+            parcel_options = f_df[jibun_col].fillna('').astype(str).tolist()
+            sel_addr = st.selectbox("조회된 필지(지번) 선택", parcel_options, key="ind_parcel_selectbox_field")
+            selected_parcel_row = f_df[f_df[jibun_col].fillna('').astype(str) == sel_addr].iloc[0]
             
             code_col = '허용 업종코드' if '허용 업종코드' in df_parcels.columns else (df_parcels.columns[2] if len(df_parcels.columns) > 2 else '')
             name_col = '업종 명칭' if '업종 명칭' in df_parcels.columns else (df_parcels.columns[3] if len(df_parcels.columns) > 3 else '')
@@ -329,7 +344,7 @@ if property_type == "산업단지 내 공장 (지번 조회)":
             auto_detected_name = str(selected_parcel_row.get(name_col, ''))
             st.success(f"🎯 **[지번 매칭 완료]** `{sel_addr}` (허용 업종코드: {auto_detected_code})")
         else:
-            st.warning("⚠ 일치하는 지번이 없습니다. 검색어를 다시 확인해주세요.")
+            st.warning("⚠ 일치하는 지번 또는 도로명이 없습니다. 검색어를 다시 확인해주세요.")
     else:
         st.warning("⚠️ 산단 데이터 파일이 로드되지 않았습니다.")
 
@@ -355,7 +370,7 @@ comprehensive_biz_dict = {
     "🏥 병의원 및 의료시설": [
         "병원", "치과의원", "한의원", "요양병원", "동물병원"
     ],
-    "🏋️️ 스포츠, 레저 및 운동시설": [
+    "🏋 스포츠, 레저 및 운동시설": [
         "피트니스·헬스장", "스크린골프장", "당구장", "수영장 및 볼링장"
     ],
     "📚 교육, 연구 및 청소년시설": [
@@ -375,11 +390,11 @@ comprehensive_biz_dict = {
     ]
 }
 
-biz_category = st.selectbox("희망 업종 대분류", list(comprehensive_biz_dict.keys()))
-target_biz = st.selectbox("세부 희망 업종 선택", comprehensive_biz_dict[biz_category])
-current_power = st.number_input("현재 건물(호실) 계약전력 (kW)", min_value=1.0, value=10.0, step=1.0)
+biz_category = st.selectbox("희망 업종 대분류", list(comprehensive_biz_dict.keys()), key="main_biz_category_select")
+target_biz = st.selectbox("세부 희망 업종 선택", comprehensive_biz_dict[biz_category], key="main_target_biz_select")
+current_power = st.number_input("현재 건물(호실) 계약전력 (kW)", min_value=1.0, value=10.0, step=1.0, key="main_current_power_input")
 
-submitted = st.button("🚀 종합 법적 진단 리포트 생성", type="primary")
+submitted = st.button("🚀 종합 법적 진단 리포트 생성", type="primary", key="main_submit_btn")
 
 if submitted:
     st.markdown("---")
