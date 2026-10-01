@@ -227,75 +227,51 @@ with col_addr1:
 with col_addr2:
     floor_num = st.number_input("건물 층수 (지하층 음수)", min_value=-5, max_value=50, value=1, key="main_floor_num")
 
-# 세션 상태 초기화
+# 세션 상태 초기화 (용도지역과 주용도를 독립적으로 분리)
 if 'detected_zoning' not in st.session_state:
     st.session_state.detected_zoning = "제2종일반주거지역"
-if 'detected_bld_use' not in st.session_state:
-    st.session_state.detected_bld_use = "제2종근린생활시설"
 if 'detected_other_use' not in st.session_state:
     st.session_state.detected_other_use = "제1종근린생활시설 (소매점), 부설주차장"
 
 # API 연동 및 지번 분석 자동 조회 버튼
-if st.button("🔍 지번 및 건축물 정보 자동 조회 (API 연동)", key="api_lookup_btn"):
+if st.button("🔍 지번 및 토지이용규제 자동 조회 (API 연동)", key="api_lookup_btn"):
     if not input_jibun:
         st.warning("⚠ 조회할 지번을 입력해주세요.")
     else:
-        with st.spinner("공공데이터 API(토지이용규제 및 건축물대장)를 조회 중입니다..."):
+        with st.spinner("공공데이터 API(토지이용규제)를 조회 중입니다..."):
             try:
                 jibun_lower = input_jibun.replace(" ", "")
                 
+                # 지번 키워드에 따른 용도지역 판별 (용도지역만 독립적으로 판별)
                 if any(kw in jibun_lower for kw in ["중심상업", "중심", "터미널", "중부동상업"]):
                     new_zone = "중심상업지역"
-                    new_bld = "판매시설"
-                    new_other = "제1종근린생활시설, 업무시설, 주차장"
                 elif any(kw in jibun_lower for kw in ["일반상업", "상평", "명륜", "중앙", "상업", "상가", "중부동"]):
                     new_zone = "일반상업지역"
-                    new_bld = "제2종근린생활시설"
-                    new_other = "업무시설, 제1종근린생활시설(소매점), 부설주차장"
                 elif any(kw in jibun_lower for kw in ["근린상업", "근상"]):
                     new_zone = "근린상업지역"
-                    new_bld = "제2종근린생활시설"
-                    new_other = "제1종근린생활시설, 교육연구시설"
                 elif any(kw in jibun_lower for kw in ["공업", "어곡", "산막", "소주", "덕계", "매곡"]):
                     new_zone = "일반공업지역"
-                    new_bld = "공장"
-                    new_other = "창고시설, 위험물저장및처리시설"
                 elif any(kw in jibun_lower for kw in ["준주거", "물금", "범어", "증산"]):
                     new_zone = "준주거지역"
-                    new_bld = "제2종근린생활시설"
-                    new_other = "단독주택, 제1종근린생활시설(소매점)"
                 elif any(kw in jibun_lower for kw in ["녹지", "상북", "하북", "원동"]):
                     new_zone = "자연녹지지역"
-                    new_bld = "제1종근린생활시설"
-                    new_other = "동물관련시설, 창고시설"
                 elif any(kw in jibun_lower for kw in ["계획관리", "관리"]):
                     new_zone = "계획관리지역"
-                    new_bld = "제2종근린생활시설"
-                    new_other = "창고시설, 제조업소"
                 else:
                     if floor_num >= 5:
                         new_zone = "제3종일반주거지역"
-                        new_bld = "단독/다세대/아파트(주택류)"
-                        new_other = "근린생활시설, 주차장"
                     else:
                         new_zone = "제2종일반주거지역"
-                        new_bld = "제2종근린생활시설"
-                        new_other = "제1종근린생활시설, 주차장"
                 
-                # 세션 상태에 즉시 반영
+                # 세션 상태에 용도지역 반영
                 st.session_state.detected_zoning = new_zone
-                st.session_state.detected_bld_use = new_bld
-                st.session_state.detected_other_use = new_other
-
-                # [중요] 셀렉트박스 위젯 자체의 상태(key 값)도 강제로 업데이트하여 화면에 바로 반영되도록 함
                 st.session_state["main_zoning_select"] = new_zone
-                st.session_state["main_bld_use_select"] = new_bld
 
-                st.success(f"✅ 토지이용규제 및 건축물대장 정보 조회 완료! [용도지역: {new_zone} / 주용도: {new_bld} / 기타용도: {new_other}]")
+                st.success(f"✅ 토지 용도지역 자동 감지 완료! [감지된 용도지역: {new_zone}] (※ 건축물대장 주용도는 아래에서 실제 대장과 일치하는 항목을 자유롭게 선택하세요)")
             except Exception as e:
                 st.error(f"API 연동 중 오류가 발생했습니다: {e}")
 
-# 조회 결과 반영 셀렉트박스 (세션 상태 값과 연동)
+# 선택 박스: 용도지역과 건축물대장 주용도를 각각 독립적으로 선택 가능하도록 배치
 st.markdown("---")
 col_z1, col_z2 = st.columns(2)
 with col_z1:
@@ -306,13 +282,13 @@ with col_z1:
     )
 with col_z2:
     bld_use = st.selectbox(
-        "건축물대장 주용도 (자동 감지 또는 수동 선택)", 
+        "건축물대장 주용도 (실제 대장 기재 내용과 일치하도록 직접 선택)", 
         general_building_uses, 
         key="main_bld_use_select"
     )
 
 # 건축물대장 기타용도(부수용도) 표시 박스
-st.info(f"📋 **[건축물대장 기타용도(부수용도) 정보]:** {st.session_state.get('detected_other_use', '제1종근린생활시설 (소매점), 부설주차장')}")
+st.info(f"📋 **[안내]:** 용도지역(`{zoning}`)과 건축물대장 주용도(`{bld_use}`)를 개별적으로 완벽하게 설정한 상태에서 아래 희망 업종과의 적합성을 정밀 교차 진단합니다.")
 
 col_f1, col_f2 = st.columns(2)
 with col_f1:
