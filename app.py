@@ -232,6 +232,8 @@ if 'detected_zoning' not in st.session_state:
     st.session_state.detected_zoning = "제2종일반주거지역"
 if 'detected_bld_use' not in st.session_state:
     st.session_state.detected_bld_use = "제2종근린생활시설"
+if 'detected_other_use' not in st.session_state:
+    st.session_state.detected_other_use = "제1종근린생활시설 (소매점), 부설주차장"
 
 # API 연동 및 지번 분석 자동 조회 버튼
 if st.button("🔍 지번 및 건축물 정보 자동 조회 (API 연동)", key="api_lookup_btn"):
@@ -240,36 +242,48 @@ if st.button("🔍 지번 및 건축물 정보 자동 조회 (API 연동)", key=
     else:
         with st.spinner("공공데이터 API(토지이용규제 및 건축물대장)를 조회 중입니다..."):
             try:
-                # 입력된 지번 텍스트 분석을 통한 스마트 자동 감지 시뮬레이션
+                # 입력된 지번 텍스트 분석을 통한 스마트 자동 감지 시뮬레이션 (상업지역 판정 강화)
                 jibun_lower = input_jibun.replace(" ", "")
                 
-                if any(kw in jibun_lower for kw in ["중심", "상업", "중부동", "터미널"]):
+                if any(kw in jibun_lower for kw in ["중심상업", "중심", "터미널", "중부동상업"]):
                     st.session_state.detected_zoning = "중심상업지역"
                     st.session_state.detected_bld_use = "판매시설"
-                elif any(kw in jibun_lower for kw in ["일반상업", "상평", "명륜", "중앙"]):
+                    st.session_state.detected_other_use = "제1종근린생활시설, 업무시설, 주차장"
+                elif any(kw in jibun_lower for kw in ["일반상업", "상평", "명륜", "중앙", "상업", "상가", "중부동"]):
                     st.session_state.detected_zoning = "일반상업지역"
                     st.session_state.detected_bld_use = "제2종근린생활시설"
+                    st.session_state.detected_other_use = "업무시설, 제1종근린생활시설(소매점), 부설주차장"
+                elif any(kw in jibun_lower for kw in ["근린상업", "근상"]):
+                    st.session_state.detected_zoning = "근린상업지역"
+                    st.session_state.detected_bld_use = "제2종근린생활시설"
+                    st.session_state.detected_other_use = "제1종근린생활시설, 교육연구시설"
                 elif any(kw in jibun_lower for kw in ["공업", "어곡", "산막", "소주", "덕계", "매곡"]):
                     st.session_state.detected_zoning = "일반공업지역"
                     st.session_state.detected_bld_use = "공장"
+                    st.session_state.detected_other_use = "창고시설, 위험물저장및처리시설"
                 elif any(kw in jibun_lower for kw in ["준주거", "물금", "범어", "증산"]):
                     st.session_state.detected_zoning = "준주거지역"
                     st.session_state.detected_bld_use = "제2종근린생활시설"
+                    st.session_state.detected_other_use = "단독주택, 제1종근린생활시설(소매점)"
                 elif any(kw in jibun_lower for kw in ["녹지", "상북", "하북", "원동"]):
                     st.session_state.detected_zoning = "자연녹지지역"
                     st.session_state.detected_bld_use = "제1종근린생활시설"
+                    st.session_state.detected_other_use = "동물관련시설, 창고시설"
                 elif any(kw in jibun_lower for kw in ["계획관리", "관리"]):
                     st.session_state.detected_zoning = "계획관리지역"
                     st.session_state.detected_bld_use = "제2종근린생활시설"
+                    st.session_state.detected_other_use = "창고시설, 제조업소"
                 else:
                     if floor_num >= 5:
                         st.session_state.detected_zoning = "제3종일반주거지역"
                         st.session_state.detected_bld_use = "단독/다세대/아파트(주택류)"
+                        st.session_state.detected_other_use = "근린생활시설, 주차장"
                     else:
                         st.session_state.detected_zoning = "제2종일반주거지역"
                         st.session_state.detected_bld_use = "제2종근린생활시설"
+                        st.session_state.detected_other_use = "제1종근린생활시설, 주차장"
                 
-                st.success(f"✅ 토지이용규제 및 건축물대장 정보 조회 완료! [용도지역: {st.session_state.detected_zoning} / 주용도: {st.session_state.detected_bld_use}]")
+                st.success(f"✅ 토지이용규제 및 건축물대장 정보 조회 완료! [용도지역: {st.session_state.detected_zoning} / 주용도: {st.session_state.detected_bld_use} / 기타용도: {st.session_state.detected_other_use}]")
             except Exception as e:
                 st.error(f"API 연동 중 오류가 발생했습니다: {e}")
 
@@ -290,6 +304,9 @@ with col_z2:
         index=general_building_uses.index(st.session_state.detected_bld_use) if st.session_state.detected_bld_use in general_building_uses else 1,
         key="main_bld_use_select"
     )
+
+# 건축물대장 기타용도(부수용도) 표시 박스
+st.info(f"📋 **[건축물대장 기타용도(부수용도) 정보]:** {st.session_state.get('detected_other_use', '제1종근린생활시설 (소매점), 부설주차장')}")
 
 col_f1, col_f2 = st.columns(2)
 with col_f1:
