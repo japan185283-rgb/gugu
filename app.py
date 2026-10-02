@@ -732,13 +732,7 @@ with col_b2:
     target_biz = st.selectbox("세부 희망 업종 선택", comprehensive_biz_dict[biz_category], key="main_target_biz_select")
 
 # 임차 세부 시설 및 건축물 물리적 조건 선택
-col_cond1, col_cond2, col_cond3 = st.columns(3)
-with col_cond1:
-    current_power = st.number_input("현재 호실 계약전력 (kW)", min_value=1.0, value=10.0, step=1.0, key="main_current_power_input")
-with col_cond2:
-    stairs_count = st.selectbox("건물 내 직통/피난계단 개수", [1, 2, 3, "4개 이상"], index=0, key="main_stairs_count_select")
-with col_cond3:
-    has_sprinkler = st.selectbox("스프링클러 설비 여부", ["설치됨", "미설치 / 미확인"], index=1, key="main_sprinkler_select")
+current_power = st.number_input("현재 호실 계약전력 (kW)", min_value=1.0, value=10.0, step=1.0, key="main_current_power_input")
 
 submitted = st.button("🚀 종합 법적 진단 리포트 생성", type="primary", key="main_submit_btn")
 
@@ -814,22 +808,6 @@ if submitted:
                 f"💡 **해결 대안:** 절대보호구역인 경우 영업이 절대 불가능하며, 상대보호구역인 경우 관할 양산교육지원청 교육환경보호위원회 심의를 통과해야만 허가 가능합니다."
             )
 
-    # 3-1. 건축물 층수 및 피난계단/소방 안전 검증 (건축법 시행령 제34조 & 다중이용업소법 제9조)
-    if floor_num < 0: # 지하층
-        if any(kw in target_biz for kw in ["유흥주점", "단란주점", "PC방", "노래연습장", "청소년게임제공업"]):
-            if stairs_count < 2:
-                warnings.append(
-                    f"[건축법 시행령 제34조 / 지하층 피난계단 안전요건] 지하층에서 '{target_biz}' 등 다중이용업소를 운영하는 경우, "
-                    f"피난층 또는 지상으로 통하는 **직통계단이 2개소 이상** 설치되어 있어야 소방안전시설완비증명서 발급이 가능합니다. (현재 직통계단: {stairs_count}개)"
-                )
-    elif floor_num >= 2 and area >= 200.0:
-        if any(kw in target_biz for kw in ["학원", "피트니스·헬스장", "유흥주점", "단란주점", "공연장"]):
-            if stairs_count < 2:
-                warnings.append(
-                    f"[건축법 시행령 제34조 제2항 / 피난계단 2개소 의무] 2층 이상 층에서 해당 면적({area}㎡)으로 영업 시, "
-                    f"피난층으로 통하는 **직통계단이 2개 이상** 확보되지 않으면 용도변경 및 인허가가 제한될 수 있습니다. (현재 직통계단: {stairs_count}개)"
-                )
-
     # 4. 건축법 주용도 및 면적별 진단 로직 (건축법 제19조 및 동법 시행령 별표 1)
     if property_type == "상가 / 일반 건축물":
         if "세탁소" in target_biz:
@@ -872,7 +850,7 @@ if submitted:
                     f"💡 **[합법화 대안]** 건물 전체의 정화조 용량과 주차 대수가 허용하는 범위 내에서, 관할 관청에 **'건축물 표시변경(제2종근린생활시설 - 일반음식점)'**을 신청하여 대장상 용도를 변경하면 합법 허가를 받을 수 있습니다."
                 )
             else:
-                legal_actions.append("🍽️️ **[음식점 창업 적합]** 식품위생법에 따른 위생교육, 지하층 직통계단 및 그리스 트랩 설치 여부 확인.")
+                legal_actions.append("🍽 **[음식점 창업 적합]** 식품위생법에 따른 위생교육, 지하층 직통계단 및 그리스 트랩 설치 여부 확인.")
 
         elif "식육판매업" in target_biz:
             if bld_use not in ["제1종근린생활시설", "제2종근린생활시설"]:
@@ -1152,12 +1130,12 @@ if submitted:
     today_str = datetime.date.today().strftime("%Y-%m-%d")
     
     report_text_lines.append("==========================================================================")
-    report_text_lines.append(f"  🛡️️ 양산시 부동산 법률 규제 검토 및 위험 진단 보고서 (발행일: {today_str})")
+    report_text_lines.append(f"  🛡 양산시 부동산 법률 규제 검토 및 위험 진단 보고서 (발행일: {today_str})")
     report_text_lines.append("==========================================================================")
     report_text_lines.append(f"📍 대상 지번: {input_jibun if input_jibun else '미입력'}")
     report_text_lines.append(f"🏢 선택 용도지역: {zoning} | 건축물 주용도: {bld_use} | 기타용도: {current_etc}")
     report_text_lines.append(f"🏗️ 지구단위계획 구역: {current_dp}")
-    report_text_lines.append(f"🎯 임차 희망 업종: {target_biz} (면적: {area}㎡ / 층수: {floor_num}층 / 직통계단: {stairs_count}개)")
+    report_text_lines.append(f"🎯 임차 희망 업종: {target_biz} (면적: {area}㎡ / 층수: {floor_num}층)")
     report_text_lines.append("--------------------------------------------------------------------------\n")
 
     with tab1:
@@ -1190,24 +1168,6 @@ if submitted:
             for act in legal_actions: 
                 st.markdown(f"- {act}")
                 report_text_lines.append(f"- {act}")
-
-        # 개별 계약 특약사항 자동 구성
-        st.markdown("---")
-        st.subheader("📝 공인중개사 필수 권고 계약 특약사항(안)")
-        special_clauses = []
-        if warnings:
-            special_clauses.append("본 계약은 임차인의 희망 업종 관할 관청 인허가(건축물 표시변경 또는 용도변경)를 조건으로 하며, 임대인은 표시변경/용도변경 신청에 필요한 서류 제공 및 협조를 이행한다. 관할 관청의 불허가 시 본 계약은 무효로 하고 지급된 계약금 전액은 즉시 반환한다.")
-        if "음식점" in target_biz or "제조" in target_biz or "세차장" in target_biz:
-            special_clauses.append("임대차 목적물의 정화조 용량 인용 초과 및 전기 승압 공사 비용, 유수분리기/그리스트랩 설치 비용의 주체는 (임대인/임차인)이 부담하기로 협의한다.")
-        if has_school_zone:
-            special_clauses.append("본 상가는 교육환경보호구역에 위치하므로, 교육지원청 심의 통과를 영업 개시 전제로 하며 심의 부결 시 조건 없이 계약을 해제한다.")
-        
-        if not special_clauses:
-            special_clauses.append("본 임대차 계약은 현 시설 상태에서의 계약이며, 공법상 관련 법령 규정을 준수하여 영업을 개시한다.")
-
-        for idx, clause in enumerate(special_clauses, 1):
-            st.info(f"**특약 {idx}:** {clause}")
-            report_text_lines.append(f"\n[추천 계약 특약 {idx}]\n{clause}")
 
         # 다운로드 기능
         report_full_text = "\n".join(report_text_lines)
@@ -1284,8 +1244,6 @@ if submitted:
         st.subheader("🧯 소방, 환경 및 위생 규제 요건 상세 심사")
         if "유흥주점" in target_biz or "단란주점" in target_biz or "PC방" in target_biz or "노래연습장" in target_biz or "청소년게임제공업" in target_biz or "무도장" in target_biz or "생활숙박시설" in target_biz or "펜션" in target_biz:
             st.markdown("- **다중이용업소의 안전관리에 관한 특별법 제9조:** 소방시설완비증명서, 방염필증, 비상구 확보, 객실별 완강기 및 화재경보기 설치 의무 대상.")
-            if has_sprinkler == "미설치 / 미확인":
-                st.warning("⚠ **[소방시설 검토 필요]** 해당 업종은 간이 스프링클러 설치가 필수일 수 있으므로 관할 양산소방서 예방안전과 검토가 요구됩니다.")
         elif "병원" in target_biz or "치과의원" in target_biz or "한의원" in target_biz or "동물병원" in target_biz:
             st.markdown("- **폐기물관리법 제13조:** 감염성·의료폐기물 전용 보관함 및 전문 처리업체 위탁 계약 필수.")
         elif "세차장" in target_biz or "세탁소" in target_biz:
