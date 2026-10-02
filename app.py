@@ -1,48 +1,177 @@
-import streamlit as st
-import pandas as pd
 import os
-import requests
-import xml.etree.ElementTree as ET
-import sqlite3
 import re
+import pandas as pd
+import streamlit as st
 
-# 1. 페이지 기본 설정 (세로형 중심 배치)
-st.set_page_config(page_title="부동산 전 업종 완벽 통합 진단 시뮬레이터 Pro", layout="centered")
+# --- 1. 페이지 및 레이아웃 설정 ---
+st.set_page_config(
+    page_title="양산시 통합 부동산/건축물/용도지역 조회 시스템",
+    page_icon="🏢",
+    layout="wide"
+)
 
-st.title("🛡 부동산 전 업종 완벽 통합 법적 진단 시뮬레이터 Pro")
-st.markdown("국토계획법, 건축법, 학교보건법, 양산시 도시계획/건축 조례 및 개별 인허가법 기반의 전수 크로스 체크 규제 진단 툴")
+# --- 2. 데이터 전처리 헬퍼 함수 ---
+def clean_num_str(val):
+    """Pandas가 숫자를 float(410.0)으로 읽었을 때 소수점(.0)을 제거하고 순수 문자열로 정제합니다."""
+    if pd.isna(val):
+        return ""
+    return str(val).split('.')[0].strip()
 
-st.markdown("---")
+# --- 3. CSV 데이터 자동 검색 및 통합 로딩 ---
+@st.cache_data(show_spinner="양산시 전체 CSV 및 산단 데이터를 연동하는 중입니다...")
+def load_all_local_csvs():
+    """
+    현재 작업 디렉토리 내의 모든 .csv 파일을 찾아 자동으로 통합합니다.
+    """
+    csv_files = [f for f in os.listdir('.') if f.endswith('.csv')]
+    if not csv_files:
+        return None, []
 
-# API 인증키 설정
-BUILDING_API_KEY = "mJgjmpJhH5%2FSZHKFHHFwkovN6r2Ptfb%2FxjnX6906XOdcPeRIjixDWwmq%2FGY4BF0om0Y%2FzKsO8aXq%2FJsx68MBJg%3D%3D"
-LAND_API_KEY = "mJgjmpJhH5%2FSZHKFHHFwkovN6r2Ptfb%2FxjnX6906XOdcPeRIjixDWwmq%2FGY4BF0om0Y%2FzKsO8aXq%2FJsx68MBJg%3D%3D"
-KAKAO_REST_API_KEY = "0a51d12c463757bc7dc14c62a99b0a85"  # 사용자 제공 카카오맵 REST API 키
+    loaded_dfs = []
+    file_list = []
 
-# 로컬 SQLite DB 파일 경로 (여러 CSV를 통합한 DB)
-LOCAL_DB_PATH = "building_data.db"
+    for file in csv_files:
+        # 다양한 한국어 인코딩 시도
+        for enc in ['cp949', 'euc-kr', 'utf-8-sig', 'utf-8']:
+            try:
+                df = pd.read_csv(file, encoding=enc, low_memory=False)
+                df.columns = df.columns.str.strip() # 컬럼명 공백 제거
+                df['_출처파일'] = file
+                loaded_dfs.append(df)
+                file_list.append(file)
+                break
+            except Exception:
+                continue
 
-# 📁 [자동 로드 로직] 폴더 안에 지정된 파일명이 있으면 자동 로드, 없으면 업로더 표시
-DEFAULT_CSV_NAME = "industrial_complex.csv"
-df_parcels = None
+    if loaded_dfs:
+        try:
+            combined_df = pd.concat(loaded_dfs, ignore_index=True)
+            return combined_df, file_list
+        except Exception:
+            return None, []
+            
+    return None, []
 
-if os.path.exists(DEFAULT_CSV_NAME):
-    try:
-        df_parcels = pd.read_csv(DEFAULT_CSV_NAME)
-        df_parcels.columns = df_parcels.columns.str.strip()
-        st.success(f"✅ **[산단 데이터 자동 연동됨]** 서버 폴더에서 기본 데이터를 불러왔습니다. (총 {len(df_parcels)}개 필지)")
-    except Exception as e:
-        st.error(f"⚠️ 기본 데이터 파일 읽기 실패: {e}")
-else:
-    st.subheader("📁 1. 노션 산단 필지 데이터 파일 업로드 (최초 1회)")
-    uploaded_file = st.file_uploader("산단 필지별 업종코드 CSV 파일을 업로드해주세요.", type=["csv"])
-    if uploaded_file is not None:
-        df_parcels = pd.read_csv(uploaded_file)
-        df_parcels.columns = df_parcels.columns.str.strip()
-        st.success(f"✅ 산단 데이터 연동 완료! (총 {len(df_parcels)}개 필지 데이터 탑재)")
+# --- 4. 지번 주소 분석 함수 ---
+def parse_lot_address(address_str):
+    """
+    입력된 주소에서 읍/면/동/리와 본번-부번을 추출합니다.
+    예: '물금읍 범어리 410-1' -> ('범어리', '410', '1')
+    """
+    address_str = address_str.strip()
+    
+    # 읍/면/동/리 추출
+    dong_match = re.search(r'([가-힣]+(?:동|리|읍|면))', address_str)
+    dong_name = dong_match.group(1) if dong_match else ""
+    
+    # 지번 (번-지) 추출
+    num_match = re.search(r'(\d+)(?:-(\d+))?', address_str)
+    main_no = num_match.group(1) if num_match else ""
+    sub_no = num_match.group(2) if (num_match and num_match.group(2)) else "0"
+    
+    return dong_name, main_no, sub_no
+
+# --- 5. CSV 데이터 기반 통합 검색 엔진 ---
+def search_in_csv_data(df, raw_address):
+    if df is None or df.empty or not raw_address.strip():
+        return pd.DataFrame(), None, None, None
+
+    dong_name, main_no, sub_no = parse_lot_address(raw_address)
+    bun_str = clean_num_str(main_no)
+    ji_str = clean_num_str(sub_no)
+    
+    cols = df.columns.tolist()
+    
+    # 컬럼 자동 감지
+    addr_col = next((c for c in cols if any(k in c.lower() for k in ['대지위치', '소재지', '주소', '지번주소', '위치'])), None)
+    purp_col = next((c for c in cols if any(k in c.lower() for k in ['주용도코드명', '주용도명', '주용도', '건축물용도', '용도'])), None)
+    zoning_col = next((c for c in cols if any(k in c.lower() for k in ['용도지역코드명', '용도지역명', '용도지역', '지역구분', '지목', '구분'])), None)
+    
+    bun_col = next((c for c in cols if c in ['번', '지번', '본번']), None)
+    ji_col = next((c for c in cols if c in ['지', '부번']), None)
+
+    matched_rows = pd.DataFrame()
+
+    # [1차 검색] 번, 지, 동/리 조건 정밀 검색
+    if bun_col and bun_str:
+        df_bun = df[bun_col].apply(clean_num_str)
+        cond_bun = (df_bun == bun_str) | (df_bun == bun_str.zfill(4))
+        
+        if ji_col and ji_str != "0":
+            df_ji = df[ji_col].apply(clean_num_str)
+            cond_ji = (df_ji == ji_str) | (df_ji == ji_str.zfill(4))
+            cond = cond_bun & cond_ji
+        else:
+            cond = cond_bun
+
+        if addr_col and dong_name:
+            cond = cond & df[addr_col].astype(str).str.contains(dong_name, na=False)
+
+        matched_rows = df[cond]
+
+    # [2차 검색] 전체 주소 텍스트 매칭
+    if matched_rows.empty and addr_col:
+        target_bun = f"{bun_str}-{ji_str}" if ji_str and ji_str != "0" else bun_str
+        cond_text = df[addr_col].astype(str).str.contains(target_bun, na=False) if target_bun else pd.Series(True, index=df.index)
+        
+        if dong_name:
+            cond_text = cond_text & df[addr_col].astype(str).str.contains(dong_name, na=False)
+            
+        matched_rows = df[cond_text]
+
+    return matched_rows, purp_col, zoning_col, addr_col
+
+
+# --- 6. UI 구성 ---
+st.title("🏢 양산시 로컬 통합 데이터 매물/지번 조회")
+st.caption("외부 API 없이 폴더 내 모든 양산시 지역 CSV 및 산단 데이터를 자동 연동하여 조회합니다.")
+
+# 데이터 자동 로드
+df_combined, loaded_files = load_all_local_csvs()
+
+# 사이드바 데이터 상태 표시
+with st.sidebar:
+    st.header("📂 데이터 연동 현황")
+    if loaded_files:
+        st.success(f"총 {len(loaded_files)}개 CSV 파일 연동 완료")
+        with st.expander("연동된 파일 목록 보기"):
+            for f in loaded_files:
+                st.write(f"- `{f}`")
     else:
-        st.info(f"💡 폴더 내에 `{DEFAULT_CSV_NAME}` 파일이 없습니다. 공장/산단 진단을 원하시면 파일을 업로드하거나 해당 이름으로 폴더에 넣어주세요.")
+        st.error("현재 폴더에 CSV 파일이 없습니다. CSV 파일을 넣어주세요.")
 
+# 메인 검색 창
+search_input = st.text_input(
+    "지번 주소를 입력하세요",
+    placeholder="예: 물금읍 범어리 410 또는 중부동 410-1",
+    key="search_query"
+)
+
+if search_input:
+    results, purp_col, zoning_col, addr_col = search_in_csv_data(df_combined, search_input)
+
+    if not results.empty:
+        st.subheader("🔎 조회 결과 요약")
+        
+        # 핵심 데이터 추출
+        purp_val = results[purp_col].dropna().iloc[0] if purp_col and not results[purp_col].dropna().empty else "정보 없음"
+        zoning_val = results[zoning_col].dropna().iloc[0] if zoning_col and not results[zoning_col].dropna().empty else "정보 없음"
+        addr_val = results[addr_col].dropna().iloc[0] if addr_col and not results[addr_col].dropna().empty else search_input
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("소재지", str(addr_val))
+        with col2:
+            st.metric("건축물 주용도", str(purp_val))
+        with col3:
+            st.metric("용도지역/구분", str(zoning_val))
+
+        st.divider()
+        st.subheader("📋 상세 검색 데이터")
+        st.dataframe(results, use_container_width=True)
+    else:
+        st.warning(f"'{search_input}'에 해당하는 데이터를 연동된 CSV 파일에서 찾지 못했습니다.")
+        st.info("💡 **확인 사항:** 입력한 동/리와 지번이 정확한지, 관련 CSV 파일이 폴더 안에 존재하는지 확인해 주세요.")
 # -----------------------------------------------------------------------------
 # 💾 [양산시 전체 건축물대장 CSV 자동 스캔 & SQLite DB 통합 검색 로직]
 # -----------------------------------------------------------------------------
