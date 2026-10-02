@@ -292,8 +292,9 @@ def search_local_csv_and_db(address_str):
                 if found_zoning and map_zoning(found_zoning):
                     break
 
-            # 지구단위계획(제1종/제2종) 전체 셀 검색
-            all_text = " ".join(matched_rows.astype(str).values.flatten())
+            # 지구단위계획(제1종/제2종) 전체 셀 검색 (오류 수정 지점)
+            all_text = " ".join([str(x) for x in matched_rows.values.flatten() if pd.notna(x)])
+            
             if "1종지구단위계획" in all_text or "제1종지구단위계획" in all_text:
                 found_district_plan = "제1종지구단위계획"
             elif "2종지구단위계획" in all_text or "제2종지구단위계획" in all_text:
@@ -333,7 +334,7 @@ def search_local_csv_and_db(address_str):
                             found_zoning = str(row_dict[db_zoning_col]).strip()
                         
                         if not found_district_plan:
-                            row_str = " ".join([str(v) for v in row if v])
+                            row_str = " ".join([str(v) for v in row if v is not None])
                             if "1종지구단위계획" in row_str or "제1종지구단위계획" in row_str:
                                 found_district_plan = "제1종지구단위계획"
                             elif "2종지구단위계획" in row_str or "제2종지구단위계획" in row_str:
