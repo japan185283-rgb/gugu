@@ -232,15 +232,15 @@ if 'detected_zoning' not in st.session_state:
     st.session_state.detected_zoning = "제2종일반주거지역"
 
 # -----------------------------------------------------------------------------
-# 🎯 [카카오맵 API + 정부 공공데이터 API 정밀 연동 로직]
+# 🎯 [카카오맵 API + 정부 공공데이터 API 정밀 연동 로직 (도로명주소 완벽 지원 수정본)]
 # -----------------------------------------------------------------------------
 if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 (API 연동)", key="api_lookup_btn"):
     if not input_jibun:
-        st.warning("⚠ 조회할 지번을 입력해주세요.")
+        st.warning("⚠ 조회할 지번 또는 도로명 주소를 입력해주세요.")
     else:
         with st.spinner("카카오맵 API로 주소를 정제하고 공공데이터 포털 API를 조회 중입니다..."):
             try:
-                # Step 1: 카카오맵 API를 통해 정확한 지번, 법정동코드, PNU 추출
+                # Step 1: 카카오맵 API 검색
                 url = "https://dapi.kakao.com/v2/local/search/address.json"
                 headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
                 params = {"query": input_jibun}
@@ -249,103 +249,114 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                 
                 if kakao_res.status_code == 200 and kakao_res.json().get('documents'):
                     doc = kakao_res.json()['documents'][0]
-                    exact_address = doc.get('address_name', '')
+                    
+                    # 도로명 주소 입력 시에도 연결된 지번 객체(address)를 안전하게 추출
+                    address_info = doc.get('address')
+                    
+                    exact_address = doc.get('address_name', input_jibun)
                     lat = float(doc['y'])
                     lon = float(doc['x'])
                     
-                    st.success(f"📍 **카카오맵 주소 정제 완료:** {exact_address}")
-                    st.map(pd.DataFrame({'lat': [lat], 'lon': [lon]}), zoom=16)
+                    if not address_info:
+                        st.error("⚠️ 입력하신 도로명 주소에 매핑된 실제 토지 지번 정보가 없습니다. '지번 주소(예: 양산시 물금읍 물금리 OOO)'로 입력해주세요.")
+                    else:
+                        jibun_address_name = address_info.get('address_name', '')
+                        st.success(f"📍 **주소 정제 완료:** {exact_address} (실제 지번: {jibun_address_name})")
+                        st.map(pd.DataFrame({'lat': [lat], 'lon': [lon]}), zoom=16)
 
-                    # 카카오맵 응답에서 PNU 고유 코드 구성요소 추출
-                    address_info = doc.get('address', {})
-                    b_code = address_info.get('b_code', '')              # 10자리 법정동코드
-                    mountain_yn = address_info.get('mountain_yn', 'N')   # 산 여부
-                    san_code = '2' if mountain_yn == 'Y' else '1'
-                    main_no = address_info.get('main_address_no', '0').zfill(4)
-                    sub_no = address_info.get('sub_address_no', '0').zfill(4)
-                    
-                    pnu = f"{b_code}{san_code}{main_no}{sub_no}"          # 19자리 PNU
-                    
-                    sigungu_cd = b_code[:5]
-                    bjdong_cd = b_code[5:]
-                    plat_gb_cd = '1' if mountain_yn == 'Y' else '0'
+                        # 실제 토지 지번 정보 파싱
+                        b_code = address_info.get('b_code', '')              # 10자리 법정동코드
+                        mountain_yn = address_info.get('mountain_yn', 'N')   # 산 여부
+                        san_code = '2' if mountain_yn == 'Y' else '1'
+                        
+                        main_no_raw = address_info.get('main_address_no', '0')
+                        sub_no_raw = address_info.get('sub_address_no', '0')
+                        
+                        main_no = main_no_raw.zfill(4) if main_no_raw else '0000'
+                        sub_no = sub_no_raw.zfill(4) if sub_no_raw else '0000'
+                        
+                        pnu = f"{b_code}{san_code}{main_no}{sub_no}"          # 19자리 PNU
+                        
+                        sigungu_cd = b_code[:5] if len(b_code) >= 5 else ''
+                        bjdong_cd = b_code[5:] if len(b_code) == 10 else ''
+                        plat_gb_cd = '1' if mountain_yn == 'Y' else '0'
 
-                    # Step 2: 공공데이터포털 건축물대장 API (표제부) 실제 주용도 조회
-                    bld_api_url = "http://apis.data.go.kr/1613000/BldRnService_v2/getBrTitleInfo"
-                    bld_params = {
-                        'serviceKey': requests.utils.unquote(BUILDING_API_KEY),
-                        'sigunguCd': sigungu_cd,
-                        'bjdongCd': bjdong_cd,
-                        'platGbCd': plat_gb_cd,
-                        'bun': main_no,
-                        'ji': sub_no,
-                        'numOfRows': '5',
-                        'pageNo': '1'
-                    }
-                    
-                    bld_res = requests.get(bld_api_url, params=bld_params, timeout=5)
-                    real_main_purp = ""
-                    if bld_res.status_code == 200:
+                        # Step 2: 공공데이터포털 건축물대장 API (표제부) 실제 주용도 조회
+                        bld_api_url = "http://apis.data.go.kr/1613000/BldRnService_v2/getBrTitleInfo"
+                        bld_params = {
+                            'serviceKey': requests.utils.unquote(BUILDING_API_KEY),
+                            'sigunguCd': sigungu_cd,
+                            'bjdongCd': bjdong_cd,
+                            'platGbCd': plat_gb_cd,
+                            'bun': main_no,
+                            'ji': sub_no,
+                            'numOfRows': '10',
+                            'pageNo': '1'
+                        }
+                        
+                        bld_res = requests.get(bld_api_url, params=bld_params, timeout=5)
+                        real_main_purp = ""
+                        if bld_res.status_code == 200:
+                            try:
+                                root = ET.fromstring(bld_res.content)
+                                items = root.findall('.//item')
+                                if items:
+                                    main_purp_elem = items[0].find('mainPurpsCdNm')
+                                    if main_purp_elem is not None and main_purp_elem.text:
+                                        real_main_purp = main_purp_elem.text.strip()
+                            except Exception:
+                                pass
+
+                        # Step 3: 공공데이터포털 토지이용계획 API 실제 용도지역 조회
+                        land_api_url = "http://apis.data.go.kr/1611000/nsdi/LandUseService/attr/getLandUseAttr"
+                        land_params = {
+                            'serviceKey': requests.utils.unquote(LAND_API_KEY),
+                            'pnu': pnu,
+                            'format': 'json',
+                            'numOfRows': '20',
+                            'pageNo': '1'
+                        }
+                        
+                        real_zoning = ""
                         try:
-                            root = ET.fromstring(bld_res.content)
-                            items = root.findall('.//item')
-                            if items:
-                                main_purp_elem = items[0].find('mainPurpsCdNm')
-                                if main_purp_elem is not None and main_purp_elem.text:
-                                    real_main_purp = main_purp_elem.text.strip()
+                            land_res = requests.get(land_api_url, params=land_params, timeout=5)
+                            if land_res.status_code == 200:
+                                land_json = land_res.json()
+                                field_list = land_json.get('landUses', {}).get('field', [])
+                                for field in field_list:
+                                    prpos_area_nm = field.get('prposAreaDstrcCodeNm', '')
+                                    for z_opt in zoning_options:
+                                        if z_opt in prpos_area_nm:
+                                            real_zoning = z_opt
+                                            break
+                                    if real_zoning:
+                                        break
                         except Exception:
                             pass
 
-                    # Step 3: 공공데이터포털 토지이용계획 API 실제 용도지역 조회
-                    land_api_url = "http://apis.data.go.kr/1611000/nsdi/LandUseService/attr/getLandUseAttr"
-                    land_params = {
-                        'serviceKey': requests.utils.unquote(LAND_API_KEY),
-                        'pnu': pnu,
-                        'format': 'json',
-                        'numOfRows': '10',
-                        'pageNo': '1'
-                    }
-                    
-                    real_zoning = ""
-                    try:
-                        land_res = requests.get(land_api_url, params=land_params, timeout=5)
-                        if land_res.status_code == 200:
-                            land_json = land_res.json()
-                            field_list = land_json.get('landUses', {}).get('field', [])
-                            for field in field_list:
-                                prpos_area_nm = field.get('prposAreaDstrcCodeNm', '')
-                                for z_opt in zoning_options:
-                                    if z_opt in prpos_area_nm:
-                                        real_zoning = z_opt
-                                        break
-                                if real_zoning:
-                                    break
-                    except Exception:
-                        pass
-
-                    # Step 4: 결과 자동 매칭 및 드롭다운 동기화
-                    if real_zoning:
-                        st.session_state["main_zoning_select"] = real_zoning
-                        st.success(f"✅ **[실제 토지이용계획 API 조회]** 용도지역: `{real_zoning}`")
-                    else:
-                        st.info("💡 공공데이터 API 조회 불가/미등록 지역이므로 용도지역 목록에서 직접 선택해주세요.")
-
-                    if real_main_purp:
-                        matched_bld = None
-                        for b_use in general_building_uses:
-                            if b_use in real_main_purp or real_main_purp in b_use:
-                                matched_bld = b_use
-                                break
-                        if matched_bld:
-                            st.session_state["main_bld_use_select"] = matched_bld
-                            st.success(f"✅ **[실제 건축물대장 API 조회]** 주용도: `{matched_bld}` ({real_main_purp})")
+                        # Step 4: 결과 자동 매칭 및 드롭다운 동기화
+                        if real_zoning:
+                            st.session_state["main_zoning_select"] = real_zoning
+                            st.success(f"✅ **[실제 토지이용계획 API 조회]** 용도지역: `{real_zoning}`")
                         else:
-                            st.info(f"📋 **[실제 건축물대장 주용도]**: `{real_main_purp}` (아래 목록에서 가장 가까운 항목 선택)")
-                    else:
-                        st.info("💡 대장 미등록 필지 또는 공공데이터 API 응답 지연으로 주용도를 수동 선택해주세요.")
+                            st.info("💡 공공데이터 API 조회 불가/미등록 지역이므로 용도지역 목록에서 직접 선택해주세요.")
+
+                        if real_main_purp:
+                            matched_bld = None
+                            for b_use in general_building_uses:
+                                if b_use in real_main_purp or real_main_purp in b_use:
+                                    matched_bld = b_use
+                                    break
+                            if matched_bld:
+                                st.session_state["main_bld_use_select"] = matched_bld
+                                st.success(f"✅ **[실제 건축물대장 API 조회]** 주용도: `{matched_bld}` ({real_main_purp})")
+                            else:
+                                st.info(f"📋 **[실제 건축물대장 주용도]**: `{real_main_purp}` (아래 목록에서 가장 가까운 항목 선택)")
+                        else:
+                            st.info("💡 대장 미등록 필지 또는 공공데이터 API 응답 지연으로 주용도를 수동 선택해주세요.")
 
                 else:
-                    st.error("⚠️ 카카오맵 API에서 지번을 찾을 수 없습니다. 정확한 지번(예: 양산시 중부동 410)을 입력하세요.")
+                    st.error("⚠️ 카카오맵 API에서 주소를 찾을 수 없습니다. 정확한 지번을 입력하세요.")
             except Exception as e:
                 st.error(f"API 연동 및 데이터 조회 중 오류가 발생했습니다: {e}")
 
