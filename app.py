@@ -21,12 +21,12 @@ LOCAL_DB_PATH = "building_data.db"
 
 
 # -----------------------------------------------------------------------------
-# 📁 [양산시 모든 지역 CSV 파일 자동 로드 및 통합 로직]
+# 📁 [양산시 모든 지역 CSV 파일(표제부/지역지구구역/산단) 자동 로드 및 통합 로직]
 # -----------------------------------------------------------------------------
 @st.cache_data(show_spinner="📂 폴더 내 양산시 모든 CSV 파일 및 산단 데이터를 자동 연동 중입니다...")
 def load_all_local_csvs():
     """
-    현재 실행 폴더 안의 모든 .csv 파일을 찾아 인코딩에 맞춰 자동으로 불러오고 통합합니다.
+    현재 실행 폴더 안의 모든 .csv 파일(표제부, 지역지구구역, 산단 등)을 찾아 인코딩에 맞춰 자동으로 불러오고 통합합니다.
     """
     csv_files = [f for f in os.listdir('.') if f.endswith('.csv')]
     if not csv_files:
@@ -58,10 +58,11 @@ def load_all_local_csvs():
 
 df_parcels, loaded_csv_files = load_all_local_csvs()
 
+# 상단 연동 안내 문구 간소화
 if loaded_csv_files:
-    st.success(f"✅ **[양산시 로컬 CSV 데이터 자동 연동 완료]** 총 {len(loaded_csv_files)}개 CSV 파일 연동 (`{', '.join(loaded_csv_files)}`)")
+    st.success(f"✅ **[양산시 로컬 CSV 데이터 자동 연동 완료]** 총 {len(loaded_csv_files)}개 CSV 파일 (건축물 표제부 및 지역지구구역) 연동 완료")
 else:
-    st.info("💡 폴더 내에 CSV 파일이 없습니다. 양산시 지번/건축물/산단 CSV 파일을 폴더에 위치시켜 주세요.")
+    st.info("💡 폴더 내에 CSV 파일이 없습니다. 양산시 지번/건축물/지역지구구역/산단 CSV 파일을 폴더에 위치시켜 주세요.")
 
 
 # -----------------------------------------------------------------------------
@@ -211,7 +212,7 @@ def map_zoning(val_str):
 
 def search_local_csv_and_db(address_str):
     """
-    폴더에 포함된 모든 양산시 CSV 및 SQLite DB에서 유효한 주용도와 용도지역을 검색합니다.
+    폴더에 포함된 모든 양산시 CSV(표제부 및 지역지구구역) 및 SQLite DB에서 유효한 주용도와 용도지역을 검색합니다.
     """
     found_purp = None
     found_zoning = None
@@ -220,13 +221,14 @@ def search_local_csv_and_db(address_str):
     main_no = num_match.group(1) if num_match else ""
     sub_no = num_match.group(2) if (num_match and num_match.group(2)) else "0"
 
-    # 1. 통합 CSV 데이터프레임 내 검색
+    # 1. 통합 CSV 데이터프레임 내 검색 (표제부 + 지역지구구역 포함)
     if df_parcels is not None and not df_parcels.empty:
         cols = df_parcels.columns.tolist()
         
         addr_col = next((c for c in cols if any(k in c.lower() for k in ['대지위치', '소재지', '주소', '지번주소', '위치', '지번'])), None)
         purp_col = next((c for c in cols if any(k in c.lower() for k in ['주용도코드명', '주용도명', '주용도', '건축물용도', '용도'])), None)
-        zoning_col = next((c for c in cols if any(k in c.lower() for k in ['용도지역코드명', '용도지역명', '용도지역', '지역구분', '지목', '구분'])), None)
+        # 지역지구구역 CSV 파일의 컬럼(지역지구명, 구역명 등) 검색 키워드 추가 보완
+        zoning_col = next((c for c in cols if any(k in c.lower() for k in ['용도지역코드명', '용도지역명', '용도지역', '지역지구명', '지역지구', '구역명', '지역구분', '지목', '구분'])), None)
 
         if addr_col:
             target_str = f"{main_no}-{sub_no}" if sub_no != "0" else main_no
@@ -1104,6 +1106,6 @@ if submitted:
         est_dis = area * rate
         st.markdown(f"- 추정 일일 오수량: `{est_dis:.1f} 톤/일`")
         if est_dis >= 5.0 or "음식점" in target_biz or "목욕장" in target_biz or "무도장" in target_biz or "숙박" in target_biz or "생활숙박시설" in target_biz or "펜션" in target_biz or "세탁소" in target_biz:
-            st.warning("⚠️️ 오수 발생량이 많거나 수질오염 유발 시설이므로, 건물 정화조 인용 초과 여부를 관리사무소에 반드시 확인하세요.")
+            st.warning("⚠ 오수 발생량이 많거나 수질오염 유발 시설이므로, 건물 정화조 인용 초과 여부를 관리사무소에 반드시 확인하세요.")
         else:
             st.success("✅ 정화조 오수 부담 안정적")
