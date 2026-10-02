@@ -52,7 +52,6 @@ def load_all_local_csvs():
             combined_df = pd.concat(loaded_dfs, ignore_index=True)
             return combined_df, file_list
         except Exception:
-            # 컬럼 구조가 다를 경우 리스트로 병합
             return loaded_dfs[0], file_list
 
     return None, []
@@ -66,76 +65,9 @@ else:
 
 
 # -----------------------------------------------------------------------------
-# 🔍 [로컬 CSV 및 SQLite DB 통합 검색 함수]
+# 🛠 [데이터 정제, 코드 매핑 및 자동 선택 보완 함수]
 # -----------------------------------------------------------------------------
-def clean_num_str(val):
-    if pd.isna(val):
-        return ""
-    return str(val).split('.')[0].strip()
-
-def search_local_csv_and_db(address_str):
-    """
-    공공데이터 API 없이, 폴더에 포함된 모든 양산시 CSV 및 SQLite DB에서 주용도와 용도지역을 검색합니다.
-    """
-    found_purp = None
-    found_zoning = None
-
-    # 지번/번호 추출
-    num_match = re.search(r'(\d+)(?:-(\d+))?', address_str)
-    main_no = num_match.group(1) if num_match else ""
-    sub_no = num_match.group(2) if (num_match and num_match.group(2)) else "0"
-
-    # 1. 통합 CSV 데이터프레임 내 검색
-    if df_parcels is not None and not df_parcels.empty:
-        cols = df_parcels.columns.tolist()
-        
-        addr_col = next((c for c in cols if any(k in c.lower() for k in ['대지위치', '소재지', '주소', '지번주소', '위치', '지번'])), None)
-        purp_col = next((c for c in cols if any(k in c.lower() for k in ['주용도코드명', '주용도명', '주용도', '건축물용도', '용도'])), None)
-        zoning_col = next((c for c in cols if any(k in c.lower() for k in ['용도지역코드명', '용도지역명', '용도지역', '지역구분', '지목', '구분'])), None)
-
-        if addr_col:
-            target_str = f"{main_no}-{sub_no}" if sub_no != "0" else main_no
-            matched = df_parcels[df_parcels[addr_col].astype(str).str.contains(target_str, na=False)]
-            
-            if not matched.empty:
-                if purp_col and not matched[purp_col].dropna().empty:
-                    found_purp = str(matched[purp_col].dropna().iloc[0]).strip()
-                if zoning_col and not matched[zoning_col].dropna().empty:
-                    found_zoning = str(matched[zoning_col].dropna().iloc[0]).strip()
-
-    # 2. 로컬 SQLite DB 백업 검색 (CSV에서 완전히 찾지 못한 경우)
-    if (not found_purp or not found_zoning) and os.path.exists(LOCAL_DB_PATH):
-        try:
-            conn = sqlite3.connect(LOCAL_DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='building_info'")
-            if cursor.fetchone():
-                cursor.execute("PRAGMA table_info(building_info)")
-                db_cols = [col[1] for col in cursor.fetchall()]
-                
-                db_purp_col = next((c for c in db_cols if any(k in c.lower() for k in ['주용도', 'mainpurpscdnm', '용도명', '건축물용도'])), None)
-                db_zoning_col = next((c for c in db_cols if any(k in c.lower() for k in ['용도지역', '지역구분', 'prposarea', '지목'])), None)
-
-                bun_z = main_no.zfill(4)
-                ji_z = sub_no.zfill(4)
-
-                cursor.execute(f"SELECT * FROM building_info WHERE (번 = ? OR 번 = ?) AND (지 = ? OR 지 = ?) LIMIT 1",
-                               (main_no, bun_z, sub_no, ji_z))
-                row = cursor.fetchone()
-                if row:
-                    row_dict = dict(zip(db_cols, row))
-                    if not found_purp and db_purp_col and row_dict.get(db_purp_col):
-                        found_purp = str(row_dict[db_purp_col]).strip()
-                    if not found_zoning and db_zoning_col and row_dict.get(db_zoning_col):
-                        found_zoning = str(row_dict[db_zoning_col]).strip()
-            conn.close()
-        except Exception:
-            pass
-
-    return found_purp, found_zoning
-
-
-# 건축물대장 주용도 데이터베이스 (직관적인 표준 대분류 체계 유지)
+# 건축물대장 주용도 데이터베이스
 general_building_uses = [
     "제1종근린생활시설",
     "제2종근린생활시설",
@@ -163,6 +95,188 @@ zoning_options = [
     "전용공업지역", "일반공업지역", "준공업지역",
     "보전녹지지역", "자연녹지지역", "계획관리지역"
 ]
+
+def is_invalid_val(val):
+    """0.0, NaN, None, 빈 문자열 등 무효 데이터를 필터링합니다."""
+    if pd.isna(val):
+        return True
+    s = str(val).strip().lower()
+    if s in ["", "nan", "none", "null", "0", "0.0", "0.00", "0.000"]:
+        return True
+    return False
+
+def map_building_use(val_str):
+    """
+    03000과 같은 건축물대장 주용도 코드 및 키워드를 한글 주용도 명칭으로 자동 변환합니다.
+    """
+    if is_invalid_val(val_str):
+        return None
+    val_str = str(val_str).strip()
+
+    # 숫자 형태의 코드 추출 (예: '03000' -> '03000')
+    code_clean = re.sub(r'[^0-9]', '', val_str)
+    if code_clean:
+        if code_clean.startswith('01') or code_clean.startswith('1000'):
+            return "단독/다세대/아파트(주택류)"
+        elif code_clean.startswith('02') or code_clean.startswith('2000'):
+            return "단독/다세대/아파트(주택류)"
+        elif code_clean.startswith('03') or code_clean.startswith('3000'):
+            return "제1종근린생활시설"
+        elif code_clean.startswith('04') or code_clean.startswith('4000'):
+            return "제2종근린생활시설"
+        elif code_clean.startswith('05') or code_clean.startswith('5000'):
+            return "문화및집회시설"
+        elif code_clean.startswith('07') or code_clean.startswith('7000'):
+            return "판매시설"
+        elif code_clean.startswith('08') or code_clean.startswith('8000'):
+            return "운수시설"
+        elif code_clean.startswith('09') or code_clean.startswith('9000'):
+            return "의료시설"
+        elif code_clean.startswith('10'):
+            return "교육연구시설"
+        elif code_clean.startswith('13'):
+            return "운동시설"
+        elif code_clean.startswith('14'):
+            return "업무시설"
+        elif code_clean.startswith('15'):
+            return "숙박시설"
+        elif code_clean.startswith('16'):
+            return "위락시설"
+        elif code_clean.startswith('17'):
+            return "공장"
+        elif code_clean.startswith('18'):
+            return "창고시설"
+        elif code_clean.startswith('20'):
+            return "자동차관련시설"
+        elif code_clean.startswith('21'):
+            return "동물관련시설"
+        elif code_clean.startswith('22'):
+            return "자원순환관련시설"
+
+    # 텍스트 직접 포함 여부 매칭
+    for b_use in general_building_uses:
+        if b_use in val_str:
+            return b_use
+
+    # 키워드 2차 탐색
+    if "1종근" in val_str or "제1종" in val_str: return "제1종근린생활시설"
+    if "2종근" in val_str or "제2종" in val_str: return "제2종근린생활시설"
+    if any(k in val_str for k in ["주택", "아파트", "다세대", "연립", "단독"]): return "단독/다세대/아파트(주택류)"
+    if "공장" in val_str: return "공장"
+    if "창고" in val_str: return "창고시설"
+    if "자동차" in val_str: return "자동차관련시설"
+    if any(k in val_str for k in ["동물", "식물"]): return "동물관련시설"
+    if any(k in val_str for k in ["자원순환", "분뇨", "쓰레기"]): return "자원순환관련시설"
+    if "숙박" in val_str: return "숙박시설"
+    if "위락" in val_str: return "위락시설"
+    if any(k in val_str for k in ["의료", "병원"]): return "의료시설"
+    if any(k in val_str for k in ["교육", "학원"]): return "교육연구시설"
+    if any(k in val_str for k in ["운동", "체육"]): return "운동시설"
+    if "업무" in val_str: return "업무시설"
+    if "판매" in val_str: return "판매시설"
+    if "운수" in val_str: return "운수시설"
+    if any(k in val_str for k in ["문화", "집회"]): return "문화및집회시설"
+
+    return None
+
+def map_zoning(val_str):
+    """
+    용도지역 약칭 및 데이터를 선택 가능한 용도지역 표준 명칭으로 자동 변환합니다.
+    """
+    if is_invalid_val(val_str):
+        return None
+    val_str = str(val_str).strip()
+
+    for z_opt in zoning_options:
+        if z_opt in val_str:
+            return z_opt
+
+    if "1종전용" in val_str: return "제1종전용주거지역"
+    if "2종전용" in val_str: return "제2종전용주거지역"
+    if "1종일반" in val_str: return "제1종일반주거지역"
+    if "2종일반" in val_str: return "제2종일반주거지역"
+    if "3종일반" in val_str: return "제3종일반주거지역"
+    if "준주거" in val_str: return "준주거지역"
+    if "중심상업" in val_str: return "중심상업지역"
+    if "일반상업" in val_str: return "일반상업지역"
+    if "근린상업" in val_str: return "근린상업지역"
+    if "전용공업" in val_str: return "전용공업지역"
+    if "일반공업" in val_str: return "일반공업지역"
+    if "준공업" in val_str: return "준공업지역"
+    if "보전녹지" in val_str: return "보전녹지지역"
+    if "자연녹지" in val_str: return "자연녹지지역"
+    if "계획관리" in val_str: return "계획관리지역"
+
+    return None
+
+def search_local_csv_and_db(address_str):
+    """
+    폴더에 포함된 모든 양산시 CSV 및 SQLite DB에서 유효한 주용도와 용도지역을 검색합니다.
+    """
+    found_purp = None
+    found_zoning = None
+
+    num_match = re.search(r'(\d+)(?:-(\d+))?', address_str)
+    main_no = num_match.group(1) if num_match else ""
+    sub_no = num_match.group(2) if (num_match and num_match.group(2)) else "0"
+
+    # 1. 통합 CSV 데이터프레임 내 검색
+    if df_parcels is not None and not df_parcels.empty:
+        cols = df_parcels.columns.tolist()
+        
+        addr_col = next((c for c in cols if any(k in c.lower() for k in ['대지위치', '소재지', '주소', '지번주소', '위치', '지번'])), None)
+        purp_col = next((c for c in cols if any(k in c.lower() for k in ['주용도코드명', '주용도명', '주용도', '건축물용도', '용도'])), None)
+        zoning_col = next((c for c in cols if any(k in c.lower() for k in ['용도지역코드명', '용도지역명', '용도지역', '지역구분', '지목', '구분'])), None)
+
+        if addr_col:
+            target_str = f"{main_no}-{sub_no}" if sub_no != "0" else main_no
+            matched = df_parcels[df_parcels[addr_col].astype(str).str.contains(target_str, na=False)]
+            
+            if not matched.empty:
+                if purp_col:
+                    valid_purps = matched[purp_col].dropna().astype(str)
+                    for val in valid_purps:
+                        if not is_invalid_val(val):
+                            found_purp = val.strip()
+                            break
+                if zoning_col:
+                    valid_zonings = matched[zoning_col].dropna().astype(str)
+                    for val in valid_zonings:
+                        if not is_invalid_val(val):
+                            found_zoning = val.strip()
+                            break
+
+    # 2. 로컬 SQLite DB 백업 검색 (CSV에서 완전히 찾지 못한 경우)
+    if (not found_purp or not found_zoning) and os.path.exists(LOCAL_DB_PATH):
+        try:
+            conn = sqlite3.connect(LOCAL_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='building_info'")
+            if cursor.fetchone():
+                cursor.execute("PRAGMA table_info(building_info)")
+                db_cols = [col[1] for col in cursor.fetchall()]
+                
+                db_purp_col = next((c for c in db_cols if any(k in c.lower() for k in ['주용도', 'mainpurpscdnm', '용도명', '건축물용도'])), None)
+                db_zoning_col = next((c for c in db_cols if any(k in c.lower() for k in ['용도지역', '지역구분', 'prposarea', '지목'])), None)
+
+                bun_z = main_no.zfill(4)
+                ji_z = sub_no.zfill(4)
+
+                cursor.execute(f"SELECT * FROM building_info WHERE (번 = ? OR 번 = ?) AND (지 = ? OR 지 = ?) LIMIT 1",
+                               (main_no, bun_z, sub_no, ji_z))
+                row = cursor.fetchone()
+                if row:
+                    row_dict = dict(zip(db_cols, row))
+                    if not found_purp and db_purp_col and not is_invalid_val(row_dict.get(db_purp_col)):
+                        found_purp = str(row_dict[db_purp_col]).strip()
+                    if not found_zoning and db_zoning_col and not is_invalid_val(row_dict.get(db_zoning_col)):
+                        found_zoning = str(row_dict[db_zoning_col]).strip()
+            conn.close()
+        except Exception:
+            pass
+
+    return found_purp, found_zoning
+
 
 # 용도지역별 기본 금지 업종 (국토계획법 시행령 별표)
 zoning_restrictions = {
@@ -325,8 +439,10 @@ with col_addr2:
     floor_num = st.number_input("건물 층수 (지하층 음수)", min_value=-5, max_value=50, value=1, key="main_floor_num")
 
 # 세션 상태 초기화
-if 'detected_zoning' not in st.session_state:
-    st.session_state.detected_zoning = "제2종일반주거지역"
+if 'main_zoning_select' not in st.session_state:
+    st.session_state["main_zoning_select"] = "제2종일반주거지역"
+if 'main_bld_use_select' not in st.session_state:
+    st.session_state["main_bld_use_select"] = "제1종근린생활시설"
 
 # -----------------------------------------------------------------------------
 # 🎯 [양산시 로컬 CSV + 카카오 맵 정제 기반 통합 정밀 연동 로직]
@@ -356,41 +472,33 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                     # Step 2: 연동된 양산시 모든 로컬 CSV 파일 및 DB에서 주용도 / 용도지역 자동 조회
                     real_main_purp, real_zoning = search_local_csv_and_db(input_jibun)
 
-                    # Step 3: 결과 자동 매칭 및 드롭다운 동기화
-                    if real_zoning:
-                        matched_z = None
-                        for z_opt in zoning_options:
-                            if z_opt in real_zoning:
-                                matched_z = z_opt
-                                break
-                        if matched_z:
-                            st.session_state["main_zoning_select"] = matched_z
-                            st.success(f"✅ **[로컬 CSV 용도지역 자동 매칭]** 용도지역: `{matched_z}` ({real_zoning})")
-                        else:
-                            st.info(f"📋 **[조회된 용도지역]**: `{real_zoning}` (목록에서 수동선택 가능)")
+                    # Step 3: 스마트 매칭 및 선택상자(Dropdown) 자동 동기화
+                    matched_z = map_zoning(real_zoning)
+                    if matched_z:
+                        st.session_state["main_zoning_select"] = matched_z
+                        st.success(f"✅ **[용도지역 자동 선택 완료]** `{matched_z}` (조회 데이터: {real_zoning})")
                     else:
-                        st.info("💡 연동된 CSV 파일에 미등록된 지번입니다. 용도지역 목록에서 직접 선택해 주세요.")
+                        if real_zoning and not is_invalid_val(real_zoning):
+                            st.info(f"📋 **[조회된 용도지역]**: `{real_zoning}` → 목록에 정확히 일치하는 항목이 없어 직접 선택해 주세요.")
+                        else:
+                            st.info("💡 연동 데이터에 용도지역 정보가 없거나 미등록 필지입니다. 용도지역 목록에서 선택해 주세요.")
 
-                    if real_main_purp:
-                        matched_bld = None
-                        for b_use in general_building_uses:
-                            if b_use in real_main_purp or real_main_purp in b_use:
-                                matched_bld = b_use
-                                break
-                        if matched_bld:
-                            st.session_state["main_bld_use_select"] = matched_bld
-                            st.success(f"✅ **[로컬 CSV 건축물 주용도 자동 매칭]** 주용도: `{matched_bld}` ({real_main_purp})")
-                        else:
-                            st.info(f"📋 **[실제 건축물 주용도]**: `{real_main_purp}` (가장 가까운 항목 선택)")
+                    matched_bld = map_building_use(real_main_purp)
+                    if matched_bld:
+                        st.session_state["main_bld_use_select"] = matched_bld
+                        st.success(f"✅ **[건축물 주용도 자동 선택 완료]** `{matched_bld}` (조회 코드/원문: {real_main_purp})")
                     else:
-                        st.info("💡 연동된 CSV 파일에 미등록된 필지이므로 주용도를 수동 선택해 주세요.")
+                        if real_main_purp and not is_invalid_val(real_main_purp):
+                            st.info(f"📋 **[조회된 주용도 코드/원문]**: `{real_main_purp}` → 목록에서 가장 가까운 용도를 선택해 주세요.")
+                        else:
+                            st.info("💡 연동 데이터에 건축물 주용도 정보가 없거나 미등록 필지입니다. 목록에서 수동 선택해 주세요.")
 
                 else:
                     st.error("⚠️ 주소를 찾을 수 없습니다. 정확한 양산시 지번(예: 양산시 중부동 410)을 입력하세요.")
             except Exception as e:
                 st.error(f"로컬 CSV 연동 및 조회 중 오류가 발생했습니다: {e}")
 
-# 선택 박스: 용도지역과 건축물대장 주용도를 각각 독립적으로 선택 가능하도록 배치
+# 선택 박스: 용도지역과 건축물대장 주용도가 자동 매칭 시 바로 반영됨
 st.markdown("---")
 col_z1, col_z2 = st.columns(2)
 with col_z1:
@@ -401,13 +509,13 @@ with col_z1:
     )
 with col_z2:
     bld_use = st.selectbox(
-        "건축물대장 주용도 (실제 대장 기재 내용과 일치하도록 직접 선택)", 
+        "건축물대장 주용도 (자동 감지 또는 수동 선택)", 
         general_building_uses, 
         key="main_bld_use_select"
     )
 
 # 건축물대장 기타용도(부수용도) 표시 박스
-st.info(f"📋 **[안내]:** 용도지역(`{zoning}`)과 건축물대장 주용도(`{bld_use}`)를 개별적으로 완벽하게 설정한 상태에서 아래 희망 업종과의 적합성을 정밀 교차 진단합니다.")
+st.info(f"📋 **[현재 설정 상태]:** 용도지역(`{zoning}`) | 건축물 주용도(`{bld_use}`)")
 
 col_f1, col_f2 = st.columns(2)
 with col_f1:
@@ -996,6 +1104,6 @@ if submitted:
         est_dis = area * rate
         st.markdown(f"- 추정 일일 오수량: `{est_dis:.1f} 톤/일`")
         if est_dis >= 5.0 or "음식점" in target_biz or "목욕장" in target_biz or "무도장" in target_biz or "숙박" in target_biz or "생활숙박시설" in target_biz or "펜션" in target_biz or "세탁소" in target_biz:
-            st.warning("⚠️ 오수 발생량이 많거나 수질오염 유발 시설이므로, 건물 정화조 인용 초과 여부를 관리사무소에 반드시 확인하세요.")
+            st.warning("⚠️️ 오수 발생량이 많거나 수질오염 유발 시설이므로, 건물 정화조 인용 초과 여부를 관리사무소에 반드시 확인하세요.")
         else:
             st.success("✅ 정화조 오수 부담 안정적")
