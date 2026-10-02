@@ -3,11 +3,12 @@ import pandas as pd
 import os
 import requests
 import xml.etree.ElementTree as ET
+import sqlite3
 
 # 1. 페이지 기본 설정 (세로형 중심 배치)
 st.set_page_config(page_title="부동산 전 업종 완벽 통합 진단 시뮬레이터 Pro", layout="centered")
 
-st.title("🛡️ 부동산 전 업종 완벽 통합 법적 진단 시뮬레이터 Pro")
+st.title("🛡️️ 부동산 전 업종 완벽 통합 법적 진단 시뮬레이터 Pro")
 st.markdown("국토계획법, 건축법, 학교보건법, 양산시 도시계획/건축 조례 및 개별 인허가법 기반의 전수 크로스 체크 규제 진단 툴")
 
 st.markdown("---")
@@ -16,6 +17,9 @@ st.markdown("---")
 BUILDING_API_KEY = "mJgjmpJhH5%2FSZHKFHHFwkovN6r2Ptfb%2FxjnX6906XOdcPeRIjixDWwmq%2FGY4BF0om0Y%2FzKsO8aXq%2FJsx68MBJg%3D%3D"
 LAND_API_KEY = "mJgjmpJhH5%2FSZHKFHHFwkovN6r2Ptfb%2FxjnX6906XOdcPeRIjixDWwmq%2FGY4BF0om0Y%2FzKsO8aXq%2FJsx68MBJg%3D%3D"
 KAKAO_REST_API_KEY = "0a51d12c463757bc7dc14c62a99b0a85"  # 사용자 제공 카카오맵 REST API 키
+
+# 로컬 SQLite DB 파일 경로 (여러 CSV를 통합한 DB)
+LOCAL_DB_PATH = "building_data.db"
 
 # 📁 [자동 로드 로직] 폴더 안에 지정된 파일명이 있으면 자동 로드, 없으면 업로더 표시
 DEFAULT_CSV_NAME = "industrial_complex.csv"
@@ -37,6 +41,73 @@ else:
         st.success(f"✅ 산단 데이터 연동 완료! (총 {len(df_parcels)}개 필지 데이터 탑재)")
     else:
         st.info(f"💡 폴더 내에 `{DEFAULT_CSV_NAME}` 파일이 없습니다. 공장/산단 진단을 원하시면 파일을 업로드하거나 해당 이름으로 폴더에 넣어주세요.")
+
+# -----------------------------------------------------------------------------
+# 💾 [로컬 SQLite DB(building_data.db) 백업 조회 함수 (Fallback)]
+# -----------------------------------------------------------------------------
+def search_local_sqlite(sigungu_cd, bjdong_cd, main_no, sub_no):
+    """
+    공공데이터 API 조회 실패 또는 미응답 시 
+    로컬 sqlite DB(building_data.db)에서 2차로 자동으로 불러옵니다.
+    """
+    if not os.path.exists(LOCAL_DB_PATH):
+        return None, None
+
+    try:
+        conn = sqlite3.connect(LOCAL_DB_PATH)
+        cursor = conn.cursor()
+
+        # 테이블 존재 여부 확인
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='building_info'")
+        if not cursor.fetchone():
+            conn.close()
+            return None, None
+
+        cursor.execute("PRAGMA table_info(building_info)")
+        cols = [col[1] for col in cursor.fetchall()]
+
+        bun_int = str(int(main_no)) if main_no.isdigit() else main_no
+        ji_int = str(int(sub_no)) if sub_no.isdigit() else sub_no
+        bun_z = main_no.zfill(4)
+        ji_z = sub_no.zfill(4)
+
+        # 주용도/용도지역 컬럼 자동 매칭
+        purp_col = next((c for c in cols if any(k in c.lower() for k in ['주용도', 'mainpurpscdnm', '용도명', '건축물용도'])), None)
+        zoning_col = next((c for c in cols if any(k in c.lower() for k in ['용도지역', '지역구분', 'prposarea', '지목'])), None)
+
+        found_purp = None
+        found_zoning = None
+
+        conditions = []
+        params = []
+
+        if '시군구코드' in cols and '법정동코드' in cols:
+            conditions.append("시군구코드 = ? AND 법정동코드 = ?")
+            params.extend([sigungu_cd, bjdong_cd])
+            if '번' in cols and '지' in cols:
+                conditions.append("(번 IN (?, ?) AND 지 IN (?, ?))")
+                params.extend([bun_int, bun_z, ji_int, ji_z])
+        elif 'PNU' in cols or 'pnu' in cols:
+            p_col = 'PNU' if 'PNU' in cols else 'pnu'
+            conditions.append(f"{p_col} LIKE ?")
+            params.append(f"{sigungu_cd}{bjdong_cd}%{bun_z}{ji_z}")
+
+        if conditions:
+            where_clause = " WHERE " + " AND ".join(conditions)
+            cursor.execute(f"SELECT * FROM building_info {where_clause} LIMIT 1", params)
+            row = cursor.fetchone()
+            if row:
+                row_dict = dict(zip(cols, row))
+                if purp_col and row_dict.get(purp_col):
+                    found_purp = str(row_dict[purp_col]).strip()
+                if zoning_col and row_dict.get(zoning_col):
+                    found_zoning = str(row_dict[zoning_col]).strip()
+
+        conn.close()
+        return found_purp, found_zoning
+    except Exception:
+        return None, None
+
 
 # 건축물대장 주용도 데이터베이스 (직관적인 표준 대분류 체계 유지)
 general_building_uses = [
@@ -232,15 +303,15 @@ if 'detected_zoning' not in st.session_state:
     st.session_state.detected_zoning = "제2종일반주거지역"
 
 # -----------------------------------------------------------------------------
-# 🎯 [카카오맵 API + 정부 공공데이터 API 정밀 연동 로직 (도로명주소 완벽 지원 수정본)]
+# 🎯 [카카오맵 API + 정부 공공데이터 API + 로컬 DB Fallback 정밀 연동 로직]
 # -----------------------------------------------------------------------------
-if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 (API 연동)", key="api_lookup_btn"):
+if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 (API & 로컬DB 연동)", key="api_lookup_btn"):
     if not input_jibun:
-        st.warning("⚠ 조회할 지번 또는 도로명 주소를 입력해주세요.")
+        st.warning("⚠ 조회할 지번을 입력해주세요.")
     else:
-        with st.spinner("카카오맵 API로 주소를 정제하고 공공데이터 포털 API를 조회 중입니다..."):
+        with st.spinner("카카오맵 API로 주소를 정제하고 공공데이터 API 및 로컬 DB를 조회 중입니다..."):
             try:
-                # Step 1: 카카오맵 API 검색
+                # Step 1: 카카오맵 API를 통해 정확한 지번, 법정동코드, PNU 추출
                 url = "https://dapi.kakao.com/v2/local/search/address.json"
                 headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
                 params = {"query": input_jibun}
@@ -249,114 +320,120 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                 
                 if kakao_res.status_code == 200 and kakao_res.json().get('documents'):
                     doc = kakao_res.json()['documents'][0]
-                    
-                    # 도로명 주소 입력 시에도 연결된 지번 객체(address)를 안전하게 추출
-                    address_info = doc.get('address')
-                    
-                    exact_address = doc.get('address_name', input_jibun)
+                    exact_address = doc.get('address_name', '')
                     lat = float(doc['y'])
                     lon = float(doc['x'])
                     
-                    if not address_info:
-                        st.error("⚠️ 입력하신 도로명 주소에 매핑된 실제 토지 지번 정보가 없습니다. '지번 주소(예: 양산시 물금읍 물금리 OOO)'로 입력해주세요.")
-                    else:
-                        jibun_address_name = address_info.get('address_name', '')
-                        st.success(f"📍 **주소 정제 완료:** {exact_address} (실제 지번: {jibun_address_name})")
-                        st.map(pd.DataFrame({'lat': [lat], 'lon': [lon]}), zoom=16)
+                    st.success(f"📍 **카카오맵 주소 정제 완료:** {exact_address}")
+                    st.map(pd.DataFrame({'lat': [lat], 'lon': [lon]}), zoom=16)
 
-                        # 실제 토지 지번 정보 파싱
-                        b_code = address_info.get('b_code', '')              # 10자리 법정동코드
-                        mountain_yn = address_info.get('mountain_yn', 'N')   # 산 여부
-                        san_code = '2' if mountain_yn == 'Y' else '1'
-                        
-                        main_no_raw = address_info.get('main_address_no', '0')
-                        sub_no_raw = address_info.get('sub_address_no', '0')
-                        
-                        main_no = main_no_raw.zfill(4) if main_no_raw else '0000'
-                        sub_no = sub_no_raw.zfill(4) if sub_no_raw else '0000'
-                        
-                        pnu = f"{b_code}{san_code}{main_no}{sub_no}"          # 19자리 PNU
-                        
-                        sigungu_cd = b_code[:5] if len(b_code) >= 5 else ''
-                        bjdong_cd = b_code[5:] if len(b_code) == 10 else ''
-                        plat_gb_cd = '1' if mountain_yn == 'Y' else '0'
+                    # 카카오맵 응답에서 PNU 고유 코드 구성요소 추출
+                    address_info = doc.get('address', {})
+                    b_code = address_info.get('b_code', '')              # 10자리 법정동코드
+                    mountain_yn = address_info.get('mountain_yn', 'N')   # 산 여부
+                    san_code = '2' if mountain_yn == 'Y' else '1'
+                    main_no = address_info.get('main_address_no', '0').zfill(4)
+                    sub_no = address_info.get('sub_address_no', '0').zfill(4)
+                    
+                    pnu = f"{b_code}{san_code}{main_no}{sub_no}"          # 19자리 PNU
+                    
+                    sigungu_cd = b_code[:5]
+                    bjdong_cd = b_code[5:]
+                    plat_gb_cd = '1' if mountain_yn == 'Y' else '0'
 
-                        # Step 2: 공공데이터포털 건축물대장 API (표제부) 실제 주용도 조회
-                        bld_api_url = "http://apis.data.go.kr/1613000/BldRnService_v2/getBrTitleInfo"
-                        bld_params = {
-                            'serviceKey': requests.utils.unquote(BUILDING_API_KEY),
-                            'sigunguCd': sigungu_cd,
-                            'bjdongCd': bjdong_cd,
-                            'platGbCd': plat_gb_cd,
-                            'bun': main_no,
-                            'ji': sub_no,
-                            'numOfRows': '10',
-                            'pageNo': '1'
-                        }
-                        
+                    # Step 2: 공공데이터포털 건축물대장 API (표제부) 실제 주용도 조회
+                    bld_api_url = "http://apis.data.go.kr/1613000/BldRnService_v2/getBrTitleInfo"
+                    bld_params = {
+                        'serviceKey': requests.utils.unquote(BUILDING_API_KEY),
+                        'sigunguCd': sigungu_cd,
+                        'bjdongCd': bjdong_cd,
+                        'platGbCd': plat_gb_cd,
+                        'bun': main_no,
+                        'ji': sub_no,
+                        'numOfRows': '5',
+                        'pageNo': '1'
+                    }
+                    
+                    real_main_purp = ""
+                    try:
                         bld_res = requests.get(bld_api_url, params=bld_params, timeout=5)
-                        real_main_purp = ""
                         if bld_res.status_code == 200:
-                            try:
-                                root = ET.fromstring(bld_res.content)
-                                items = root.findall('.//item')
-                                if items:
-                                    main_purp_elem = items[0].find('mainPurpsCdNm')
-                                    if main_purp_elem is not None and main_purp_elem.text:
-                                        real_main_purp = main_purp_elem.text.strip()
-                            except Exception:
-                                pass
+                            root = ET.fromstring(bld_res.content)
+                            items = root.findall('.//item')
+                            if items:
+                                main_purp_elem = items[0].find('mainPurpsCdNm')
+                                if main_purp_elem is not None and main_purp_elem.text:
+                                    real_main_purp = main_purp_elem.text.strip()
+                    except Exception:
+                        pass
 
-                        # Step 3: 공공데이터포털 토지이용계획 API 실제 용도지역 조회
-                        land_api_url = "http://apis.data.go.kr/1611000/nsdi/LandUseService/attr/getLandUseAttr"
-                        land_params = {
-                            'serviceKey': requests.utils.unquote(LAND_API_KEY),
-                            'pnu': pnu,
-                            'format': 'json',
-                            'numOfRows': '20',
-                            'pageNo': '1'
-                        }
-                        
-                        real_zoning = ""
-                        try:
-                            land_res = requests.get(land_api_url, params=land_params, timeout=5)
-                            if land_res.status_code == 200:
-                                land_json = land_res.json()
-                                field_list = land_json.get('landUses', {}).get('field', [])
-                                for field in field_list:
-                                    prpos_area_nm = field.get('prposAreaDstrcCodeNm', '')
-                                    for z_opt in zoning_options:
-                                        if z_opt in prpos_area_nm:
-                                            real_zoning = z_opt
-                                            break
-                                    if real_zoning:
+                    # Step 3: 공공데이터포털 토지이용계획 API 실제 용도지역 조회
+                    land_api_url = "http://apis.data.go.kr/1611000/nsdi/LandUseService/attr/getLandUseAttr"
+                    land_params = {
+                        'serviceKey': requests.utils.unquote(LAND_API_KEY),
+                        'pnu': pnu,
+                        'format': 'json',
+                        'numOfRows': '10',
+                        'pageNo': '1'
+                    }
+                    
+                    real_zoning = ""
+                    try:
+                        land_res = requests.get(land_api_url, params=land_params, timeout=5)
+                        if land_res.status_code == 200:
+                            land_json = land_res.json()
+                            field_list = land_json.get('landUses', {}).get('field', [])
+                            for field in field_list:
+                                prpos_area_nm = field.get('prposAreaDstrcCodeNm', '')
+                                for z_opt in zoning_options:
+                                    if z_opt in prpos_area_nm:
+                                        real_zoning = z_opt
                                         break
-                        except Exception:
-                            pass
-
-                        # Step 4: 결과 자동 매칭 및 드롭다운 동기화
-                        if real_zoning:
-                            st.session_state["main_zoning_select"] = real_zoning
-                            st.success(f"✅ **[실제 토지이용계획 API 조회]** 용도지역: `{real_zoning}`")
-                        else:
-                            st.info("💡 공공데이터 API 조회 불가/미등록 지역이므로 용도지역 목록에서 직접 선택해주세요.")
-
-                        if real_main_purp:
-                            matched_bld = None
-                            for b_use in general_building_uses:
-                                if b_use in real_main_purp or real_main_purp in b_use:
-                                    matched_bld = b_use
+                                if real_zoning:
                                     break
-                            if matched_bld:
-                                st.session_state["main_bld_use_select"] = matched_bld
-                                st.success(f"✅ **[실제 건축물대장 API 조회]** 주용도: `{matched_bld}` ({real_main_purp})")
-                            else:
-                                st.info(f"📋 **[실제 건축물대장 주용도]**: `{real_main_purp}` (아래 목록에서 가장 가까운 항목 선택)")
+                    except Exception:
+                        pass
+
+                    # Step 4: [Fallback] API 응답 실패/조회 불가 시 로컬 SQLite DB(building_data.db) 2차 자동 검색
+                    local_purp, local_zoning = None, None
+                    if not real_main_purp or not real_zoning:
+                        local_purp, local_zoning = search_local_sqlite(sigungu_cd, bjdong_cd, main_no, sub_no)
+
+                    if not real_main_purp and local_purp:
+                        real_main_purp = local_purp
+                        st.info(f"💾 **[로컬 DB 백업 연동]** 공공 API 미응답으로 로컬 DB(`building_data.db`)에서 주용도를 불러왔습니다: `{local_purp}`")
+
+                    if not real_zoning and local_zoning:
+                        for z_opt in zoning_options:
+                            if z_opt in local_zoning:
+                                real_zoning = z_opt
+                                break
+                        if real_zoning:
+                            st.info(f"💾 **[로컬 DB 백업 연동]** 공공 API 미응답으로 로컬 DB(`building_data.db`)에서 용도지역을 불러왔습니다: `{real_zoning}`")
+
+                    # Step 5: 결과 자동 매칭 및 드롭다운 동기화
+                    if real_zoning:
+                        st.session_state["main_zoning_select"] = real_zoning
+                        st.success(f"✅ **[용도지역 자동 매칭 완료]** 용도지역: `{real_zoning}`")
+                    else:
+                        st.info("💡 공공데이터 API 및 로컬 DB 조회 불가/미등록 지역이므로 용도지역 목록에서 직접 선택해주세요.")
+
+                    if real_main_purp:
+                        matched_bld = None
+                        for b_use in general_building_uses:
+                            if b_use in real_main_purp or real_main_purp in b_use:
+                                matched_bld = b_use
+                                break
+                        if matched_bld:
+                            st.session_state["main_bld_use_select"] = matched_bld
+                            st.success(f"✅ **[건축물대장 주용도 자동 매칭 완료]** 주용도: `{matched_bld}` ({real_main_purp})")
                         else:
-                            st.info("💡 대장 미등록 필지 또는 공공데이터 API 응답 지연으로 주용도를 수동 선택해주세요.")
+                            st.info(f"📋 **[실제 건축물대장 주용도]**: `{real_main_purp}` (아래 목록에서 가장 가까운 항목 선택)")
+                    else:
+                        st.info("💡 공공데이터 API 및 로컬 DB 미등록 필지이므로 주용도를 수동 선택해주세요.")
 
                 else:
-                    st.error("⚠️ 카카오맵 API에서 주소를 찾을 수 없습니다. 정확한 지번을 입력하세요.")
+                    st.error("⚠️ 카카오맵 API에서 지번을 찾을 수 없습니다. 정확한 지번(예: 양산시 중부동 410)을 입력하세요.")
             except Exception as e:
                 st.error(f"API 연동 및 데이터 조회 중 오류가 발생했습니다: {e}")
 
