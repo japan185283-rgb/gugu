@@ -212,14 +212,16 @@ def map_zoning(val_str):
 
 def search_local_csv_and_db(address_str):
     """
-    폴더에 포함된 모든 양산시 CSV(표제부 및 지역지구구역) 및 SQLite DB에서 유효한 주용도, 용도지역 및 지구단위계획(1종/2종)을 검색합니다.
+    폴더에 포함된 모든 양산시 CSV(표제부 및 지역지구구역) 및 SQLite DB에서 
+    유효한 주용도, 기타용도, 용도지역 및 지구단위계획(1종/2종)을 검색합니다.
     """
     found_purp = None
+    found_etc_purp = None
     found_zoning = None
     found_district_plan = None
 
     if not address_str:
-        return None, None, None
+        return None, None, None, None
 
     # 주소 키워드 토큰화 (예: '중부동 410-1' -> ['중부동', '410-1'])
     clean_addr = re.sub(r'[^\w\s-]', '', address_str).strip()
@@ -268,14 +270,24 @@ def search_local_csv_and_db(address_str):
         if not matched_rows.empty:
             matched_rows = matched_rows.drop_duplicates()
 
-            # 건축물 주용도 추출
-            purp_cols = [c for c in cols if any(k in c.lower() for k in ['주용도코드명', '주용도명', '주용도', '건축물용도', '용도'])]
+            # 건축물 주용도 추출 ('기타' 포함 컬럼 제외)
+            purp_cols = [c for c in cols if any(k in c.lower() for k in ['주용도코드명', '주용도명', '주용도', '건축물용도', '용도']) and '기타' not in c.lower()]
             for p_col in purp_cols:
                 for val in matched_rows[p_col].dropna().astype(str):
                     if not is_invalid_val(val):
                         found_purp = val.strip()
                         break
                 if found_purp:
+                    break
+
+            # 건축물 기타용도 추출 (신규 추가)
+            etc_purp_cols = [c for c in cols if any(k in c.lower() for k in ['기타용도명', '기타용도', 'etcpurps', 'etc_purp'])]
+            for e_col in etc_purp_cols:
+                for val in matched_rows[e_col].dropna().astype(str):
+                    if not is_invalid_val(val):
+                        found_etc_purp = val.strip()
+                        break
+                if found_etc_purp:
                     break
 
             # 용도지역 추출
@@ -292,7 +304,7 @@ def search_local_csv_and_db(address_str):
                 if found_zoning and map_zoning(found_zoning):
                     break
 
-            # 지구단위계획(제1종/제2종) 전체 셀 검색 (오류 수정 지점)
+            # 지구단위계획(제1종/제2종) 전체 셀 검색
             all_text = " ".join([str(x) for x in matched_rows.values.flatten() if pd.notna(x)])
             
             if "1종지구단위계획" in all_text or "제1종지구단위계획" in all_text:
@@ -304,7 +316,7 @@ def search_local_csv_and_db(address_str):
                 found_district_plan = dp_match.group(1) if dp_match else "지구단위계획구역"
 
     # 2. 로컬 SQLite DB 백업 검색 (CSV에서 미발견 시)
-    if (not found_purp or not found_zoning) and os.path.exists(LOCAL_DB_PATH):
+    if (not found_purp or not found_etc_purp or not found_zoning) and os.path.exists(LOCAL_DB_PATH):
         try:
             conn = sqlite3.connect(LOCAL_DB_PATH)
             cursor = conn.cursor()
@@ -313,7 +325,8 @@ def search_local_csv_and_db(address_str):
                 cursor.execute("PRAGMA table_info(building_info)")
                 db_cols = [col[1] for col in cursor.fetchall()]
                 
-                db_purp_col = next((c for c in db_cols if any(k in c.lower() for k in ['주용도', 'mainpurpscdnm', '용도명', '건축물용도'])), None)
+                db_purp_col = next((c for c in db_cols if any(k in c.lower() for k in ['주용도', 'mainpurpscdnm', '용도명', '건축물용도']) and '기타' not in c.lower()), None)
+                db_etc_purp_col = next((c for c in db_cols if any(k in c.lower() for k in ['기타용도', 'etcpurps', 'etc_purp'])), None)
                 db_zoning_col = next((c for c in db_cols if any(k in c.lower() for k in ['용도지역', '지역구분', 'prposarea', '지목'])), None)
 
                 num_match = re.search(r'(\d+)(?:-(\d+))?', address_str)
@@ -330,6 +343,8 @@ def search_local_csv_and_db(address_str):
                         row_dict = dict(zip(db_cols, row))
                         if not found_purp and db_purp_col and not is_invalid_val(row_dict.get(db_purp_col)):
                             found_purp = str(row_dict[db_purp_col]).strip()
+                        if not found_etc_purp and db_etc_purp_col and not is_invalid_val(row_dict.get(db_etc_purp_col)):
+                            found_etc_purp = str(row_dict[db_etc_purp_col]).strip()
                         if not found_zoning and db_zoning_col and not is_invalid_val(row_dict.get(db_zoning_col)):
                             found_zoning = str(row_dict[db_zoning_col]).strip()
                         
@@ -345,7 +360,7 @@ def search_local_csv_and_db(address_str):
         except Exception:
             pass
 
-    return found_purp, found_zoning, found_district_plan
+    return found_purp, found_etc_purp, found_zoning, found_district_plan
 
 
 # 용도지역별 기본 금지 업종 (국토계획법 시행령 별표)
