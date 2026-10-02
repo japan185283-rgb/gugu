@@ -213,15 +213,17 @@ def map_zoning(val_str):
 
 def search_local_csv_and_db(address_str):
     """
-    폴더에 포함된 모든 양산시 CSV(표제부 및 지역지구구역) 및 SQLite DB에서 유효한 주용도, 기타용도, 용도지역 및 지구단위계획(1종/2종)을 검색합니다.
+    폴더에 포함된 모든 양산시 CSV(표제부 및 지역지구구역) 및 SQLite DB에서 유효한 주용도, 기타용도, 용도지역, 지구단위계획(1종/2종), 건폐율 및 용적률을 검색합니다.
     """
     found_purp = None
     found_etc_purp = None
     found_zoning = None
     found_district_plan = None
+    found_bcv = None  # 건폐율
+    found_far = None  # 용적률
 
     if not address_str:
-        return None, None, None, None
+        return None, None, None, None, None, None
 
     # 주소 키워드 토큰화 (예: '중부동 410-1' -> ['중부동', '410-1'])
     clean_addr = re.sub(r'[^\w\s-]', '', address_str).strip()
@@ -304,6 +306,28 @@ def search_local_csv_and_db(address_str):
                 if found_zoning and map_zoning(found_zoning):
                     break
 
+            # 건폐율 추출
+            bcv_cols = [c for c in cols if any(k in c.lower() for k in ['건폐율', 'bldcovrt', 'bld_cov_rt'])]
+            for b_col in bcv_cols:
+                for val in matched_rows[b_col].dropna().astype(str):
+                    if not is_invalid_val(val):
+                        val_str = val.strip()
+                        found_bcv = val_str + "%" if not val_str.endswith("%") else val_str
+                        break
+                if found_bcv:
+                    break
+
+            # 용적률 추출
+            far_cols = [c for c in cols if any(k in c.lower() for k in ['용적률', '용적율', 'measrt', 'meas_rt', 'totarearat'])]
+            for f_col in far_cols:
+                for val in matched_rows[f_col].dropna().astype(str):
+                    if not is_invalid_val(val):
+                        val_str = val.strip()
+                        found_far = val_str + "%" if not val_str.endswith("%") else val_str
+                        break
+                if found_far:
+                    break
+
             # 지구단위계획(제1종/제2종) 전체 셀 검색
             all_text = " ".join([str(x) for x in matched_rows.values.flatten() if pd.notna(x)])
             if "1종지구단위계획" in all_text or "제1종지구단위계획" in all_text:
@@ -315,7 +339,7 @@ def search_local_csv_and_db(address_str):
                 found_district_plan = dp_match.group(1) if dp_match else "지구단위계획구역"
 
     # 2. 로컬 SQLite DB 백업 검색
-    if (not found_purp or not found_zoning or not found_etc_purp) and os.path.exists(LOCAL_DB_PATH):
+    if (not found_purp or not found_zoning or not found_etc_purp or not found_bcv or not found_far) and os.path.exists(LOCAL_DB_PATH):
         try:
             conn = sqlite3.connect(LOCAL_DB_PATH)
             cursor = conn.cursor()
@@ -327,6 +351,8 @@ def search_local_csv_and_db(address_str):
                 db_purp_col = next((c for c in db_cols if any(k in c.lower() for k in ['주용도', 'mainpurpscdnm', '용도명', '건축물용도']) and '기타' not in c), None)
                 db_etc_purp_col = next((c for c in db_cols if any(k in c.lower() for k in ['기타용도', 'etcpurpscdnm'])), None)
                 db_zoning_col = next((c for c in db_cols if any(k in c.lower() for k in ['용도지역', '지역구분', 'prposarea', '지목'])), None)
+                db_bcv_col = next((c for c in db_cols if any(k in c.lower() for k in ['건폐율', 'bldcovrt', 'bld_cov_rt'])), None)
+                db_far_col = next((c for c in db_cols if any(k in c.lower() for k in ['용적률', '용적율', 'measrt', 'meas_rt'])), None)
 
                 num_match = re.search(r'(\d+)(?:-(\d+))?', address_str)
                 if num_match:
@@ -346,6 +372,12 @@ def search_local_csv_and_db(address_str):
                             found_etc_purp = str(row_dict[db_etc_purp_col]).strip()
                         if not found_zoning and db_zoning_col and not is_invalid_val(row_dict.get(db_zoning_col)):
                             found_zoning = str(row_dict[db_zoning_col]).strip()
+                        if not found_bcv and db_bcv_col and not is_invalid_val(row_dict.get(db_bcv_col)):
+                            val_str = str(row_dict[db_bcv_col]).strip()
+                            found_bcv = val_str + "%" if not val_str.endswith("%") else val_str
+                        if not found_far and db_far_col and not is_invalid_val(row_dict.get(db_far_col)):
+                            val_str = str(row_dict[db_far_col]).strip()
+                            found_far = val_str + "%" if not val_str.endswith("%") else val_str
                         
                         if not found_district_plan:
                             row_str = " ".join([str(v) for v in row if v is not None])
@@ -359,7 +391,7 @@ def search_local_csv_and_db(address_str):
         except Exception:
             pass
 
-    return found_purp, found_zoning, found_district_plan, found_etc_purp
+    return found_purp, found_zoning, found_district_plan, found_etc_purp, found_bcv, found_far
 
 
 # 용도지역별 기본 금지 업종 (국토계획법 시행령 별표)
@@ -531,6 +563,10 @@ if 'district_plan_info' not in st.session_state:
     st.session_state["district_plan_info"] = "해당없음 / 미지정"
 if 'etc_purp_info' not in st.session_state:
     st.session_state["etc_purp_info"] = "해당없음 / 미등록"
+if 'bcv_info' not in st.session_state:
+    st.session_state["bcv_info"] = "정보없음"
+if 'far_info' not in st.session_state:
+    st.session_state["far_info"] = "정보없음"
 
 # -----------------------------------------------------------------------------
 # 🎯 [양산시 로컬 CSV + 카카오 맵 정제 기반 통합 정밀 연동 로직]
@@ -557,8 +593,8 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                     st.success(f"📍 **카카오맵 주소 정제 완료:** {exact_address}")
                     st.map(pd.DataFrame({'lat': [lat], 'lon': [lon]}), zoom=16)
 
-                    # Step 2: 연동된 양산시 모든 로컬 CSV 파일 및 DB에서 주용도 / 기타용도 / 용도지역 / 지구단위계획 자동 조회
-                    real_main_purp, real_zoning, real_district_plan, real_etc_purp = search_local_csv_and_db(input_jibun)
+                    # Step 2: 연동된 양산시 모든 로컬 CSV 파일 및 DB에서 주용도 / 기타용도 / 용도지역 / 지구단위계획 / 건폐율 / 용적률 자동 조회
+                    real_main_purp, real_zoning, real_district_plan, real_etc_purp, real_bcv, real_far = search_local_csv_and_db(input_jibun)
 
                     # Step 3: 기타용도 확인 및 상태 저장
                     if real_etc_purp and not is_invalid_val(real_etc_purp):
@@ -567,7 +603,20 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                     else:
                         st.session_state["etc_purp_info"] = "해당없음 / 미등록"
 
-                    # Step 4: 지구단위계획 (제1종/제2종 등) 정보 자동 감지 및 상태 저장
+                    # Step 4: 건폐율 / 용적률 확인 및 상태 저장
+                    if real_bcv and not is_invalid_val(real_bcv):
+                        st.session_state["bcv_info"] = real_bcv
+                        st.success(f"📐 **[건폐율 확인]** `{real_bcv}`")
+                    else:
+                        st.session_state["bcv_info"] = "정보없음"
+
+                    if real_far and not is_invalid_val(real_far):
+                        st.session_state["far_info"] = real_far
+                        st.success(f"🏗️ **[용적률 확인]** `{real_far}`")
+                    else:
+                        st.session_state["far_info"] = "정보없음"
+
+                    # Step 5: 지구단위계획 (제1종/제2종 등) 정보 자동 감지 및 상태 저장
                     if real_district_plan:
                         st.session_state["district_plan_info"] = real_district_plan
                         st.success(f"🏗️ **[지구단위계획 확인]** `{real_district_plan}` 구역 지정 필지입니다.")
@@ -622,10 +671,12 @@ with col_z2:
         key="main_bld_use_select"
     )
 
-# 건축물대장 및 지구단위계획/기타용도 상태 표시 박스
+# 건축물대장 및 지구단위계획/기타용도/건폐율/용적률 상태 표시 박스
 current_dp = st.session_state.get("district_plan_info", "해당없음 / 미지정")
 current_etc = st.session_state.get("etc_purp_info", "해당없음 / 미등록")
-st.info(f"📋 **[현재 설정 상태]:** 용도지역(`{zoning}`) | 주용도(`{bld_use}`) | 기타용도(`{current_etc}`) | 지구단위계획(`{current_dp}`)")
+current_bcv = st.session_state.get("bcv_info", "정보없음")
+current_far = st.session_state.get("far_info", "정보없음")
+st.info(f"📋 **[현재 설정 상태]:** 용도지역(`{zoning}`) | 주용도(`{bld_use}`) | 기타용도(`{current_etc}`) | 건폐율(`{current_bcv}`) | 용적률(`{current_far}`) | 지구단위계획(`{current_dp}`)")
 
 col_f1, col_f2 = st.columns(2)
 with col_f1:
@@ -1134,6 +1185,7 @@ if submitted:
     report_text_lines.append("==========================================================================")
     report_text_lines.append(f"📍 대상 지번: {input_jibun if input_jibun else '미입력'}")
     report_text_lines.append(f"🏢 선택 용도지역: {zoning} | 건축물 주용도: {bld_use} | 기타용도: {current_etc}")
+    report_text_lines.append(f"📐 건폐율: {current_bcv} | 용적률: {current_far}")
     report_text_lines.append(f"🏗️ 지구단위계획 구역: {current_dp}")
     report_text_lines.append(f"🎯 임차 희망 업종: {target_biz} (면적: {area}㎡ / 층수: {floor_num}층)")
     report_text_lines.append("--------------------------------------------------------------------------\n")
@@ -1163,7 +1215,7 @@ if submitted:
             st.markdown("---")
             
         if legal_actions:
-            st.markdown("### 🛠️ [실무 법적 조치 및 상세 가이드]")
+            st.markdown("### 🛠️️ [실무 법적 조치 및 상세 가이드]")
             report_text_lines.append("\n[🛠️ 실무 법적 조치 가이드]")
             for act in legal_actions: 
                 st.markdown(f"- {act}")
