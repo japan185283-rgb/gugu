@@ -212,8 +212,7 @@ def map_zoning(val_str):
 
 def search_local_csv_and_db(address_str):
     """
-    폴더에 포함된 모든 양산시 CSV(표제부 및 지역지구구역) 및 SQLite DB에서 
-    유효한 주용도, 기타용도, 용도지역 및 지구단위계획(1종/2종)을 검색합니다.
+    폴더에 포함된 모든 양산시 CSV(표제부 및 지역지구구역) 및 SQLite DB에서 유효한 주용도, 기타용도, 용도지역 및 지구단위계획(1종/2종)을 검색합니다.
     """
     found_purp = None
     found_etc_purp = None
@@ -270,8 +269,8 @@ def search_local_csv_and_db(address_str):
         if not matched_rows.empty:
             matched_rows = matched_rows.drop_duplicates()
 
-            # 건축물 주용도 추출 ('기타' 포함 컬럼 제외)
-            purp_cols = [c for c in cols if any(k in c.lower() for k in ['주용도코드명', '주용도명', '주용도', '건축물용도', '용도']) and '기타' not in c.lower()]
+            # 건축물 주용도 추출
+            purp_cols = [c for c in cols if any(k in c.lower() for k in ['주용도코드명', '주용도명', '주용도', '건축물용도', '용도']) and '기타' not in c]
             for p_col in purp_cols:
                 for val in matched_rows[p_col].dropna().astype(str):
                     if not is_invalid_val(val):
@@ -280,8 +279,8 @@ def search_local_csv_and_db(address_str):
                 if found_purp:
                     break
 
-            # 건축물 기타용도 추출 (신규 추가)
-            etc_purp_cols = [c for c in cols if any(k in c.lower() for k in ['기타용도명', '기타용도', 'etcpurps', 'etc_purp'])]
+            # 건축물 기타용도 추출 (표제부 CSV 연동)
+            etc_purp_cols = [c for c in cols if any(k in c.lower() for k in ['기타용도', '기타용도명', '기타용도코드명', 'etcpurpscdnm'])]
             for e_col in etc_purp_cols:
                 for val in matched_rows[e_col].dropna().astype(str):
                     if not is_invalid_val(val):
@@ -304,9 +303,8 @@ def search_local_csv_and_db(address_str):
                 if found_zoning and map_zoning(found_zoning):
                     break
 
-            # 지구단위계획(제1종/제2종) 전체 셀 검색
+            # 지구단위계획(제1종/제2종) 전체 셀 검색 (float 타입 안전 변환 적용)
             all_text = " ".join([str(x) for x in matched_rows.values.flatten() if pd.notna(x)])
-            
             if "1종지구단위계획" in all_text or "제1종지구단위계획" in all_text:
                 found_district_plan = "제1종지구단위계획"
             elif "2종지구단위계획" in all_text or "제2종지구단위계획" in all_text:
@@ -316,7 +314,7 @@ def search_local_csv_and_db(address_str):
                 found_district_plan = dp_match.group(1) if dp_match else "지구단위계획구역"
 
     # 2. 로컬 SQLite DB 백업 검색 (CSV에서 미발견 시)
-    if (not found_purp or not found_etc_purp or not found_zoning) and os.path.exists(LOCAL_DB_PATH):
+    if (not found_purp or not found_zoning or not found_etc_purp) and os.path.exists(LOCAL_DB_PATH):
         try:
             conn = sqlite3.connect(LOCAL_DB_PATH)
             cursor = conn.cursor()
@@ -325,8 +323,8 @@ def search_local_csv_and_db(address_str):
                 cursor.execute("PRAGMA table_info(building_info)")
                 db_cols = [col[1] for col in cursor.fetchall()]
                 
-                db_purp_col = next((c for c in db_cols if any(k in c.lower() for k in ['주용도', 'mainpurpscdnm', '용도명', '건축물용도']) and '기타' not in c.lower()), None)
-                db_etc_purp_col = next((c for c in db_cols if any(k in c.lower() for k in ['기타용도', 'etcpurps', 'etc_purp'])), None)
+                db_purp_col = next((c for c in db_cols if any(k in c.lower() for k in ['주용도', 'mainpurpscdnm', '용도명', '건축물용도']) and '기타' not in c), None)
+                db_etc_purp_col = next((c for c in db_cols if any(k in c.lower() for k in ['기타용도', 'etcpurpscdnm'])), None)
                 db_zoning_col = next((c for c in db_cols if any(k in c.lower() for k in ['용도지역', '지역구분', 'prposarea', '지목'])), None)
 
                 num_match = re.search(r'(\d+)(?:-(\d+))?', address_str)
@@ -360,7 +358,7 @@ def search_local_csv_and_db(address_str):
         except Exception:
             pass
 
-    return found_purp, found_etc_purp, found_zoning, found_district_plan
+    return found_purp, found_zoning, found_district_plan, found_etc_purp
 
 
 # 용도지역별 기본 금지 업종 (국토계획법 시행령 별표)
@@ -429,7 +427,7 @@ yangsan_ordinance_rules = {
         "legal_basis": "양산시 조례에 따라 공장, 지식산업센터 및 공장 지원 시설 외의 일반 대중 이용 상업시설은 허용 구역이 엄격히 제한됩니다."
     },
     "준공업지역": {
-        "additional_prohibited": ["위락시설(대형)", "숙박시설"],
+        "additional_prohibited": ["위락시설(대형)", "무도장(일부제한)"],
         "legal_basis": "양산시 조례에 따라 아파트형 공장 및 지원상가 비율에 따른 업종 제한 규정이 적용됩니다."
     },
     "보전녹지지역": {
@@ -530,6 +528,8 @@ if 'main_bld_use_select' not in st.session_state:
     st.session_state["main_bld_use_select"] = "제1종근린생활시설"
 if 'district_plan_info' not in st.session_state:
     st.session_state["district_plan_info"] = "해당없음 / 미지정"
+if 'etc_purp_info' not in st.session_state:
+    st.session_state["etc_purp_info"] = "해당없음 / 미등록"
 
 # -----------------------------------------------------------------------------
 # 🎯 [양산시 로컬 CSV + 카카오 맵 정제 기반 통합 정밀 연동 로직]
@@ -556,10 +556,17 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                     st.success(f"📍 **카카오맵 주소 정제 완료:** {exact_address}")
                     st.map(pd.DataFrame({'lat': [lat], 'lon': [lon]}), zoom=16)
 
-                    # Step 2: 연동된 양산시 모든 로컬 CSV 파일 및 DB에서 주용도 / 용도지역 / 지구단위계획 자동 조회
-                    real_main_purp, real_zoning, real_district_plan = search_local_csv_and_db(input_jibun)
+                    # Step 2: 연동된 양산시 모든 로컬 CSV 파일 및 DB에서 주용도 / 기타용도 / 용도지역 / 지구단위계획 자동 조회
+                    real_main_purp, real_zoning, real_district_plan, real_etc_purp = search_local_csv_and_db(input_jibun)
 
-                    # Step 3: 지구단위계획 (제1종/제2종 등) 정보 자동 감지 및 상태 저장
+                    # Step 3: 기타용도 확인 및 상태 저장
+                    if real_etc_purp and not is_invalid_val(real_etc_purp):
+                        st.session_state["etc_purp_info"] = real_etc_purp
+                        st.success(f"🏷️ **[건축물 기타용도 확인]** `{real_etc_purp}`")
+                    else:
+                        st.session_state["etc_purp_info"] = "해당없음 / 미등록"
+
+                    # Step 4: 지구단위계획 (제1종/제2종 등) 정보 자동 감지 및 상태 저장
                     if real_district_plan:
                         st.session_state["district_plan_info"] = real_district_plan
                         st.success(f"🏗️ **[지구단위계획 확인]** `{real_district_plan}` 구역 지정 필지입니다.")
@@ -578,10 +585,15 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                         else:
                             st.info("💡 연동 데이터에 용도지역 정보가 없거나 미등록 필지입니다. 용도지역 목록에서 선택해 주세요.")
 
+                    # 주용도 또는 기타용도를 기준으로 스마트 매칭
                     matched_bld = map_building_use(real_main_purp)
+                    if not matched_bld and real_etc_purp:
+                        matched_bld = map_building_use(real_etc_purp)
+
                     if matched_bld:
                         st.session_state["main_bld_use_select"] = matched_bld
-                        st.success(f"✅ **[건축물 주용도 자동 선택 완료]** `{matched_bld}` (조회 코드/원문: {real_main_purp})")
+                        disp_src = real_main_purp if real_main_purp else f"기타용도({real_etc_purp})"
+                        st.success(f"✅ **[건축물 주용도 자동 선택 완료]** `{matched_bld}` (조회 데이터: {disp_src})")
                     else:
                         if real_main_purp and not is_invalid_val(real_main_purp):
                             st.info(f"📋 **[조회된 주용도 코드/원문]**: `{real_main_purp}` → 목록에서 가장 가까운 용도를 선택해 주세요.")
@@ -609,9 +621,10 @@ with col_z2:
         key="main_bld_use_select"
     )
 
-# 건축물대장 및 지구단위계획 상태 표시 박스
+# 건축물대장 및 지구단위계획/기타용도 상태 표시 박스
 current_dp = st.session_state.get("district_plan_info", "해당없음 / 미지정")
-st.info(f"📋 **[현재 설정 상태]:** 용도지역(`{zoning}`) | 건축물 주용도(`{bld_use}`) | 지구단위계획(`{current_dp}`)")
+current_etc = st.session_state.get("etc_purp_info", "해당없음 / 미등록")
+st.info(f"📋 **[현재 설정 상태]:** 용도지역(`{zoning}`) | 주용도(`{bld_use}`) | 기타용도(`{current_etc}`) | 지구단위계획(`{current_dp}`)")
 
 col_f1, col_f2 = st.columns(2)
 with col_f1:
