@@ -212,43 +212,97 @@ def map_zoning(val_str):
 
 def search_local_csv_and_db(address_str):
     """
-    폴더에 포함된 모든 양산시 CSV(표제부 및 지역지구구역) 및 SQLite DB에서 유효한 주용도와 용도지역을 검색합니다.
+    폴더에 포함된 모든 양산시 CSV(표제부 및 지역지구구역) 및 SQLite DB에서 유효한 주용도, 용도지역 및 지구단위계획(1종/2종)을 검색합니다.
     """
     found_purp = None
     found_zoning = None
+    found_district_plan = None
 
-    num_match = re.search(r'(\d+)(?:-(\d+))?', address_str)
-    main_no = num_match.group(1) if num_match else ""
-    sub_no = num_match.group(2) if (num_match and num_match.group(2)) else "0"
+    if not address_str:
+        return None, None, None
 
-    # 1. 통합 CSV 데이터프레임 내 검색 (표제부 + 지역지구구역 포함)
+    # 주소 키워드 토큰화 (예: '중부동 410-1' -> ['중부동', '410-1'])
+    clean_addr = re.sub(r'[^\w\s-]', '', address_str).strip()
+    tokens = [t for t in clean_addr.split() if t not in ['경상남도', '양산시', '경남', '양산']]
+
+    # 1. 통합 CSV 데이터프레임 내 검색
     if df_parcels is not None and not df_parcels.empty:
         cols = df_parcels.columns.tolist()
+        addr_cols = [c for c in cols if any(k in c.lower() for k in ['대지위치', '소재지', '주소', '지번주소', '위치', '지번'])]
+
+        matched_rows = pd.DataFrame()
         
-        addr_col = next((c for c in cols if any(k in c.lower() for k in ['대지위치', '소재지', '주소', '지번주소', '위치', '지번'])), None)
-        purp_col = next((c for c in cols if any(k in c.lower() for k in ['주용도코드명', '주용도명', '주용도', '건축물용도', '용도'])), None)
-        # 지역지구구역 CSV 파일의 컬럼(지역지구명, 구역명 등) 검색 키워드 추가 보완
-        zoning_col = next((c for c in cols if any(k in c.lower() for k in ['용도지역코드명', '용도지역명', '용도지역', '지역지구명', '지역지구', '구역명', '지역구분', '지목', '구분'])), None)
+        if addr_cols:
+            # 1차: 토큰 기반 정밀 검색 (동/리/읍/면 + 지번 복합)
+            for a_col in addr_cols:
+                col_str = df_parcels[a_col].fillna('').astype(str)
+                mask = pd.Series(True, index=df_parcels.index)
+                for token in tokens:
+                    if len(token) > 0:
+                        mask = mask & col_str.str.contains(re.escape(token), na=False)
+                
+                sub_matched = df_parcels[mask]
+                if not sub_matched.empty:
+                    matched_rows = pd.concat([matched_rows, sub_matched])
 
-        if addr_col:
-            target_str = f"{main_no}-{sub_no}" if sub_no != "0" else main_no
-            matched = df_parcels[df_parcels[addr_col].astype(str).str.contains(target_str, na=False)]
-            
-            if not matched.empty:
-                if purp_col:
-                    valid_purps = matched[purp_col].dropna().astype(str)
-                    for val in valid_purps:
-                        if not is_invalid_val(val):
-                            found_purp = val.strip()
+            # 2차 유연 검색: 지번 번호(본번-부번) 및 동/리 포함 검색
+            if matched_rows.empty:
+                num_match = re.search(r'(\d+)(?:-(\d+))?', address_str)
+                dong_match = re.search(r'([가-힣]+(?:동|리|읍|면))', address_str)
+                
+                if num_match:
+                    main_no = num_match.group(1)
+                    sub_no = num_match.group(2) if num_match.group(2) else ""
+                    num_str = f"{main_no}-{sub_no}" if sub_no else main_no
+                    
+                    for a_col in addr_cols:
+                        col_str = df_parcels[a_col].fillna('').astype(str)
+                        mask = col_str.str.contains(r'\b' + re.escape(num_str) + r'\b', na=False) | col_str.str.contains(re.escape(num_str), na=False)
+                        if dong_match:
+                            mask = mask & col_str.str.contains(dong_match.group(1), na=False)
+                        
+                        sub_matched = df_parcels[mask]
+                        if not sub_matched.empty:
+                            matched_rows = pd.concat([matched_rows, sub_matched])
+
+        if not matched_rows.empty:
+            matched_rows = matched_rows.drop_duplicates()
+
+            # 건축물 주용도 추출
+            purp_cols = [c for c in cols if any(k in c.lower() for k in ['주용도코드명', '주용도명', '주용도', '건축물용도', '용도'])]
+            for p_col in purp_cols:
+                for val in matched_rows[p_col].dropna().astype(str):
+                    if not is_invalid_val(val):
+                        found_purp = val.strip()
+                        break
+                if found_purp:
+                    break
+
+            # 용도지역 추출
+            zoning_cols = [c for c in cols if any(k in c.lower() for k in ['용도지역코드명', '용도지역명', '용도지역', '지역지구명', '지역지구', '구역명', '지역구분', '지목', '구분'])]
+            for z_col in zoning_cols:
+                for val in matched_rows[z_col].dropna().astype(str):
+                    if not is_invalid_val(val):
+                        mapped_z = map_zoning(val)
+                        if mapped_z:
+                            found_zoning = mapped_z
                             break
-                if zoning_col:
-                    valid_zonings = matched[zoning_col].dropna().astype(str)
-                    for val in valid_zonings:
-                        if not is_invalid_val(val):
+                        elif not found_zoning:
                             found_zoning = val.strip()
-                            break
+                if found_zoning and map_zoning(found_zoning):
+                    break
 
-    # 2. 로컬 SQLite DB 백업 검색 (CSV에서 완전히 찾지 못한 경우)
+            # 지구단위계획(제1종/제2종) 전체 셀 검색
+            all_text = " ".join(matched_rows.astype(str).values.flatten())
+            if "1종지구단위계획" in all_text or "제1종지구단위계획" in all_text:
+                found_district_plan = "제1종지구단위계획"
+            elif "2종지구단위계획" in all_text or "제2종지구단위계획" in all_text:
+                found_district_plan = "제2종지구단위계획"
+            elif "지구단위계획" in all_text:
+                dp_match = re.search(r'([가-힣0-9a-zA-A]*지구단위계획[가-힣0-9a-zA-A]*)', all_text)
+                found_district_plan = dp_match.group(1) if dp_match else "지구단위계획구역"
+
+    # 2. 로컬 SQLite DB 백업 검색 (CSV에서 미발견 시)
     if (not found_purp or not found_zoning) and os.path.exists(LOCAL_DB_PATH):
         try:
             conn = sqlite3.connect(LOCAL_DB_PATH)
@@ -261,23 +315,36 @@ def search_local_csv_and_db(address_str):
                 db_purp_col = next((c for c in db_cols if any(k in c.lower() for k in ['주용도', 'mainpurpscdnm', '용도명', '건축물용도'])), None)
                 db_zoning_col = next((c for c in db_cols if any(k in c.lower() for k in ['용도지역', '지역구분', 'prposarea', '지목'])), None)
 
-                bun_z = main_no.zfill(4)
-                ji_z = sub_no.zfill(4)
+                num_match = re.search(r'(\d+)(?:-(\d+))?', address_str)
+                if num_match:
+                    main_no = num_match.group(1)
+                    sub_no = num_match.group(2) if num_match.group(2) else "0"
+                    bun_z = main_no.zfill(4)
+                    ji_z = sub_no.zfill(4)
 
-                cursor.execute(f"SELECT * FROM building_info WHERE (번 = ? OR 번 = ?) AND (지 = ? OR 지 = ?) LIMIT 1",
-                               (main_no, bun_z, sub_no, ji_z))
-                row = cursor.fetchone()
-                if row:
-                    row_dict = dict(zip(db_cols, row))
-                    if not found_purp and db_purp_col and not is_invalid_val(row_dict.get(db_purp_col)):
-                        found_purp = str(row_dict[db_purp_col]).strip()
-                    if not found_zoning and db_zoning_col and not is_invalid_val(row_dict.get(db_zoning_col)):
-                        found_zoning = str(row_dict[db_zoning_col]).strip()
+                    cursor.execute("SELECT * FROM building_info WHERE (번 = ? OR 번 = ?) AND (지 = ? OR 지 = ?) LIMIT 1",
+                                   (main_no, bun_z, sub_no, ji_z))
+                    row = cursor.fetchone()
+                    if row:
+                        row_dict = dict(zip(db_cols, row))
+                        if not found_purp and db_purp_col and not is_invalid_val(row_dict.get(db_purp_col)):
+                            found_purp = str(row_dict[db_purp_col]).strip()
+                        if not found_zoning and db_zoning_col and not is_invalid_val(row_dict.get(db_zoning_col)):
+                            found_zoning = str(row_dict[db_zoning_col]).strip()
+                        
+                        if not found_district_plan:
+                            row_str = " ".join([str(v) for v in row if v])
+                            if "1종지구단위계획" in row_str or "제1종지구단위계획" in row_str:
+                                found_district_plan = "제1종지구단위계획"
+                            elif "2종지구단위계획" in row_str or "제2종지구단위계획" in row_str:
+                                found_district_plan = "제2종지구단위계획"
+                            elif "지구단위계획" in row_str:
+                                found_district_plan = "지구단위계획구역"
             conn.close()
         except Exception:
             pass
 
-    return found_purp, found_zoning
+    return found_purp, found_zoning, found_district_plan
 
 
 # 용도지역별 기본 금지 업종 (국토계획법 시행령 별표)
@@ -445,6 +512,8 @@ if 'main_zoning_select' not in st.session_state:
     st.session_state["main_zoning_select"] = "제2종일반주거지역"
 if 'main_bld_use_select' not in st.session_state:
     st.session_state["main_bld_use_select"] = "제1종근린생활시설"
+if 'district_plan_info' not in st.session_state:
+    st.session_state["district_plan_info"] = "해당없음 / 미지정"
 
 # -----------------------------------------------------------------------------
 # 🎯 [양산시 로컬 CSV + 카카오 맵 정제 기반 통합 정밀 연동 로직]
@@ -471,10 +540,18 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                     st.success(f"📍 **카카오맵 주소 정제 완료:** {exact_address}")
                     st.map(pd.DataFrame({'lat': [lat], 'lon': [lon]}), zoom=16)
 
-                    # Step 2: 연동된 양산시 모든 로컬 CSV 파일 및 DB에서 주용도 / 용도지역 자동 조회
-                    real_main_purp, real_zoning = search_local_csv_and_db(input_jibun)
+                    # Step 2: 연동된 양산시 모든 로컬 CSV 파일 및 DB에서 주용도 / 용도지역 / 지구단위계획 자동 조회
+                    real_main_purp, real_zoning, real_district_plan = search_local_csv_and_db(input_jibun)
 
-                    # Step 3: 스마트 매칭 및 선택상자(Dropdown) 자동 동기화
+                    # Step 3: 지구단위계획 (제1종/제2종 등) 정보 자동 감지 및 상태 저장
+                    if real_district_plan:
+                        st.session_state["district_plan_info"] = real_district_plan
+                        st.success(f"🏗️ **[지구단위계획 확인]** `{real_district_plan}` 구역 지정 필지입니다.")
+                    else:
+                        st.session_state["district_plan_info"] = "해당없음 / 미지정"
+                        st.info("💡 일반 지구단위계획 미지정 필지입니다.")
+
+                    # 스마트 매칭 및 선택상자(Dropdown) 자동 동기화
                     matched_z = map_zoning(real_zoning)
                     if matched_z:
                         st.session_state["main_zoning_select"] = matched_z
@@ -516,8 +593,9 @@ with col_z2:
         key="main_bld_use_select"
     )
 
-# 건축물대장 기타용도(부수용도) 표시 박스
-st.info(f"📋 **[현재 설정 상태]:** 용도지역(`{zoning}`) | 건축물 주용도(`{bld_use}`)")
+# 건축물대장 및 지구단위계획 상태 표시 박스
+current_dp = st.session_state.get("district_plan_info", "해당없음 / 미지정")
+st.info(f"📋 **[현재 설정 상태]:** 용도지역(`{zoning}`) | 건축물 주용도(`{bld_use}`) | 지구단위계획(`{current_dp}`)")
 
 col_f1, col_f2 = st.columns(2)
 with col_f1:
@@ -629,6 +707,14 @@ if submitted:
     fatal_errors = []
     warnings = []
     legal_actions = []
+
+    # 지구단위계획 특약 안내 추가
+    dp_state = st.session_state.get("district_plan_info", "")
+    if dp_state and dp_state != "해당없음 / 미지정":
+        legal_actions.append(
+            f"🏗️ **[지구단위계획 지정 필지 - {dp_state}]** 해당 지번은 **{dp_state}** 지정 구역입니다. "
+            f"지구단위계획 구역 내에서는 일반 용도지역상 허용 업종이더라도 **양산시 지구단위계획 결정도서 및 허용/권장/불허 용도 지침**이 우선 적용되므로 관할 관청(도시개발과/건축과)에 개별 지침을 반드시 교차 확인하세요."
+        )
 
     # 1. 용도지역 제한 검증 (국토계획법)
     if property_type == "상가 / 일반 건축물" and zoning in zoning_restrictions:
@@ -795,7 +881,7 @@ if submitted:
             if bld_use != "의료시설":
                 warnings.append(
                     f"[병원급 의료시설 합법화 대안] 주용도가 '의료시설'이어야 합니다. (현재: {bld_use}) "
-                    f"💡 **[합법화 대안]** 대형 건물의 경우 **'의료시설'**로 용도변경 승인을 받아야 하나, 소방 및 주차 기준이 매우 까다로우므로 전문 건축사와 사전 검토가 필수입니다."
+                    f"💡 **[합법화 대안]** 대형 건물의 경우 **'의료시설'**로 용도변경 승인을 받아야 하나, 소방 및 주차 기준이 매우 까다로운 만큼 전문 건축사와 사전 검토가 필수입니다."
                 )
             else:
                 legal_actions.append("🏥 **[의료시설 적합]** 소방시설 엄격 기준 충족 필수.")
