@@ -1,27 +1,32 @@
 import os
 import re
+import sqlite3
 import pandas as pd
+import requests
 import streamlit as st
 
-# --- 1. 페이지 및 레이아웃 설정 ---
-st.set_page_config(
-    page_title="양산시 통합 부동산/건축물/용도지역 조회 시스템",
-    page_icon="🏢",
-    layout="wide"
-)
+# 1. 페이지 기본 설정 (세로형 중심 배치)
+st.set_page_config(page_title="부동산 전 업종 완벽 통합 진단 시뮬레이터 Pro", layout="centered")
 
-# --- 2. 데이터 전처리 헬퍼 함수 ---
-def clean_num_str(val):
-    """Pandas가 숫자를 float(410.0)으로 읽었을 때 소수점(.0)을 제거하고 순수 문자열로 정제합니다."""
-    if pd.isna(val):
-        return ""
-    return str(val).split('.')[0].strip()
+st.title("🛡 부동산 전 업종 완벽 통합 법적 진단 시뮬레이터 Pro")
+st.markdown("국토계획법, 건축법, 학교보건법, 양산시 도시계획/건축 조례 및 개별 인허가법 기반의 전수 크로스 체크 규제 진단 툴")
 
-# --- 3. CSV 데이터 자동 검색 및 통합 로딩 ---
-@st.cache_data(show_spinner="양산시 전체 CSV 및 산단 데이터를 연동하는 중입니다...")
+st.markdown("---")
+
+# Kakao REST API 키 (지도 및 주소 좌표 정제용)
+KAKAO_REST_API_KEY = "0a51d12c463757bc7dc14c62a99b0a85"
+
+# 로컬 SQLite DB 파일 경로
+LOCAL_DB_PATH = "building_data.db"
+
+
+# -----------------------------------------------------------------------------
+# 📁 [양산시 모든 지역 CSV 파일 자동 로드 및 통합 로직]
+# -----------------------------------------------------------------------------
+@st.cache_data(show_spinner="📂 폴더 내 양산시 모든 CSV 파일 및 산단 데이터를 자동 연동 중입니다...")
 def load_all_local_csvs():
     """
-    현재 작업 디렉토리 내의 모든 .csv 파일을 찾아 자동으로 통합합니다.
+    현재 실행 폴더 안의 모든 .csv 파일을 찾아 인코딩에 맞춰 자동으로 불러오고 통합합니다.
     """
     csv_files = [f for f in os.listdir('.') if f.endswith('.csv')]
     if not csv_files:
@@ -31,11 +36,10 @@ def load_all_local_csvs():
     file_list = []
 
     for file in csv_files:
-        # 다양한 한국어 인코딩 시도
         for enc in ['cp949', 'euc-kr', 'utf-8-sig', 'utf-8']:
             try:
                 df = pd.read_csv(file, encoding=enc, low_memory=False)
-                df.columns = df.columns.str.strip() # 컬럼명 공백 제거
+                df.columns = df.columns.str.strip()
                 df['_출처파일'] = file
                 loaded_dfs.append(df)
                 file_list.append(file)
@@ -48,258 +52,82 @@ def load_all_local_csvs():
             combined_df = pd.concat(loaded_dfs, ignore_index=True)
             return combined_df, file_list
         except Exception:
-            return None, []
-            
+            # 컬럼 구조가 다를 경우 리스트로 병합
+            return loaded_dfs[0], file_list
+
     return None, []
 
-# --- 4. 지번 주소 분석 함수 ---
-def parse_lot_address(address_str):
-    """
-    입력된 주소에서 읍/면/동/리와 본번-부번을 추출합니다.
-    예: '물금읍 범어리 410-1' -> ('범어리', '410', '1')
-    """
-    address_str = address_str.strip()
-    
-    # 읍/면/동/리 추출
-    dong_match = re.search(r'([가-힣]+(?:동|리|읍|면))', address_str)
-    dong_name = dong_match.group(1) if dong_match else ""
-    
-    # 지번 (번-지) 추출
-    num_match = re.search(r'(\d+)(?:-(\d+))?', address_str)
-    main_no = num_match.group(1) if num_match else ""
-    sub_no = num_match.group(2) if (num_match and num_match.group(2)) else "0"
-    
-    return dong_name, main_no, sub_no
+df_parcels, loaded_csv_files = load_all_local_csvs()
 
-# --- 5. CSV 데이터 기반 통합 검색 엔진 ---
-def search_in_csv_data(df, raw_address):
-    if df is None or df.empty or not raw_address.strip():
-        return pd.DataFrame(), None, None, None
-
-    dong_name, main_no, sub_no = parse_lot_address(raw_address)
-    bun_str = clean_num_str(main_no)
-    ji_str = clean_num_str(sub_no)
-    
-    cols = df.columns.tolist()
-    
-    # 컬럼 자동 감지
-    addr_col = next((c for c in cols if any(k in c.lower() for k in ['대지위치', '소재지', '주소', '지번주소', '위치'])), None)
-    purp_col = next((c for c in cols if any(k in c.lower() for k in ['주용도코드명', '주용도명', '주용도', '건축물용도', '용도'])), None)
-    zoning_col = next((c for c in cols if any(k in c.lower() for k in ['용도지역코드명', '용도지역명', '용도지역', '지역구분', '지목', '구분'])), None)
-    
-    bun_col = next((c for c in cols if c in ['번', '지번', '본번']), None)
-    ji_col = next((c for c in cols if c in ['지', '부번']), None)
-
-    matched_rows = pd.DataFrame()
-
-    # [1차 검색] 번, 지, 동/리 조건 정밀 검색
-    if bun_col and bun_str:
-        df_bun = df[bun_col].apply(clean_num_str)
-        cond_bun = (df_bun == bun_str) | (df_bun == bun_str.zfill(4))
-        
-        if ji_col and ji_str != "0":
-            df_ji = df[ji_col].apply(clean_num_str)
-            cond_ji = (df_ji == ji_str) | (df_ji == ji_str.zfill(4))
-            cond = cond_bun & cond_ji
-        else:
-            cond = cond_bun
-
-        if addr_col and dong_name:
-            cond = cond & df[addr_col].astype(str).str.contains(dong_name, na=False)
-
-        matched_rows = df[cond]
-
-    # [2차 검색] 전체 주소 텍스트 매칭
-    if matched_rows.empty and addr_col:
-        target_bun = f"{bun_str}-{ji_str}" if ji_str and ji_str != "0" else bun_str
-        cond_text = df[addr_col].astype(str).str.contains(target_bun, na=False) if target_bun else pd.Series(True, index=df.index)
-        
-        if dong_name:
-            cond_text = cond_text & df[addr_col].astype(str).str.contains(dong_name, na=False)
-            
-        matched_rows = df[cond_text]
-
-    return matched_rows, purp_col, zoning_col, addr_col
+if loaded_csv_files:
+    st.success(f"✅ **[양산시 로컬 CSV 데이터 자동 연동 완료]** 총 {len(loaded_csv_files)}개 CSV 파일 연동 (`{', '.join(loaded_csv_files)}`)")
+else:
+    st.info("💡 폴더 내에 CSV 파일이 없습니다. 양산시 지번/건축물/산단 CSV 파일을 폴더에 위치시켜 주세요.")
 
 
-# --- 6. UI 구성 ---
-st.title("🏢 양산시 로컬 통합 데이터 매물/지번 조회")
-st.caption("외부 API 없이 폴더 내 모든 양산시 지역 CSV 및 산단 데이터를 자동 연동하여 조회합니다.")
-
-# 데이터 자동 로드
-df_combined, loaded_files = load_all_local_csvs()
-
-# 사이드바 데이터 상태 표시
-with st.sidebar:
-    st.header("📂 데이터 연동 현황")
-    if loaded_files:
-        st.success(f"총 {len(loaded_files)}개 CSV 파일 연동 완료")
-        with st.expander("연동된 파일 목록 보기"):
-            for f in loaded_files:
-                st.write(f"- `{f}`")
-    else:
-        st.error("현재 폴더에 CSV 파일이 없습니다. CSV 파일을 넣어주세요.")
-
-# 메인 검색 창
-search_input = st.text_input(
-    "지번 주소를 입력하세요",
-    placeholder="예: 물금읍 범어리 410 또는 중부동 410-1",
-    key="search_query"
-)
-
-if search_input:
-    results, purp_col, zoning_col, addr_col = search_in_csv_data(df_combined, search_input)
-
-    if not results.empty:
-        st.subheader("🔎 조회 결과 요약")
-        
-        # 핵심 데이터 추출
-        purp_val = results[purp_col].dropna().iloc[0] if purp_col and not results[purp_col].dropna().empty else "정보 없음"
-        zoning_val = results[zoning_col].dropna().iloc[0] if zoning_col and not results[zoning_col].dropna().empty else "정보 없음"
-        addr_val = results[addr_col].dropna().iloc[0] if addr_col and not results[addr_col].dropna().empty else search_input
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("소재지", str(addr_val))
-        with col2:
-            st.metric("건축물 주용도", str(purp_val))
-        with col3:
-            st.metric("용도지역/구분", str(zoning_val))
-
-        st.divider()
-        st.subheader("📋 상세 검색 데이터")
-        st.dataframe(results, use_container_width=True)
-    else:
-        st.warning(f"'{search_input}'에 해당하는 데이터를 연동된 CSV 파일에서 찾지 못했습니다.")
-        st.info("💡 **확인 사항:** 입력한 동/리와 지번이 정확한지, 관련 CSV 파일이 폴더 안에 존재하는지 확인해 주세요.")
 # -----------------------------------------------------------------------------
-# 💾 [양산시 전체 건축물대장 CSV 자동 스캔 & SQLite DB 통합 검색 로직]
+# 🔍 [로컬 CSV 및 SQLite DB 통합 검색 함수]
 # -----------------------------------------------------------------------------
-@st.cache_data(show_spinner=False)
-def load_all_yangsan_csv():
-    """
-    깃허브 루트 폴더에 존재하는 양산시 읍/면/동별 건축물대장 CSV 파일들을
-    자동으로 탐색하고 하나로 통합하여 메모리에 캐싱합니다.
-    """
-    csv_files = [f for f in os.listdir('.') if f.endswith('.csv') and ('건축물대장' in f or '48330' in f or f.startswith('01_'))]
-    if not csv_files:
-        return None
-    
-    dfs = []
-    for file in csv_files:
-        # 다양한 한글 인코딩(cp949, euc-kr, utf-8) 자동 시도
-        for enc in ['cp949', 'euc-kr', 'utf-8-sig', 'utf-8']:
-            try:
-                df = pd.read_csv(file, encoding=enc, low_memory=False)
-                df.columns = df.columns.str.strip()
-                dfs.append(df)
-                break
-            except Exception:
-                continue
+def clean_num_str(val):
+    if pd.isna(val):
+        return ""
+    return str(val).split('.')[0].strip()
 
-    if dfs:
-        try:
-            full_df = pd.concat(dfs, ignore_index=True)
-            return full_df
-        except Exception:
-            return None
-    return None
-
-def search_local_sqlite_or_csv(sigungu_cd, bjdong_cd, main_no, sub_no, raw_address=""):
+def search_local_csv_and_db(address_str):
     """
-    공공데이터 API 조회 실패 또는 미응답 시 
-    깃허브 내 양산시 CSV 파일 통합 데이터 및 SQLite DB에서 지번으로 정밀 검색합니다.
+    공공데이터 API 없이, 폴더에 포함된 모든 양산시 CSV 및 SQLite DB에서 주용도와 용도지역을 검색합니다.
     """
     found_purp = None
     found_zoning = None
 
-    # 번/지 숫자 정제 (예: "0410" -> "410", "0000" -> "0")
-    bun_int = str(int(main_no)) if main_no.isdigit() else main_no
-    ji_int = str(int(sub_no)) if sub_no.isdigit() else sub_no
-    bun_z = main_no.zfill(4)
-    ji_z = sub_no.zfill(4)
+    # 지번/번호 추출
+    num_match = re.search(r'(\d+)(?:-(\d+))?', address_str)
+    main_no = num_match.group(1) if num_match else ""
+    sub_no = num_match.group(2) if (num_match and num_match.group(2)) else "0"
 
-    # 1차: 양산 전체 CSV 통합 데이터프레임 검색
-    df_all = load_all_yangsan_csv()
-    if df_all is not None:
-        cols = df_all.columns.tolist()
+    # 1. 통합 CSV 데이터프레임 내 검색
+    if df_parcels is not None and not df_parcels.empty:
+        cols = df_parcels.columns.tolist()
         
-        # 컬럼 매칭
-        purp_col = next((c for c in cols if any(k in c.lower() for k in ['주용도코드명', '주용도', 'mainpurpscdnm', '용도명', '건축물용도'])), None)
-        zoning_col = next((c for c in cols if any(k in c.lower() for k in ['용도지역코드명', '용도지역', '지역구분', 'prposarea', '지목', '지역지구명'])), None)
-        addr_col = next((c for c in cols if any(k in c.lower() for k in ['대지위치', '소재지', '주소', '지번주소'])), None)
+        addr_col = next((c for c in cols if any(k in c.lower() for k in ['대지위치', '소재지', '주소', '지번주소', '위치', '지번'])), None)
+        purp_col = next((c for c in cols if any(k in c.lower() for k in ['주용도코드명', '주용도명', '주용도', '건축물용도', '용도'])), None)
+        zoning_col = next((c for c in cols if any(k in c.lower() for k in ['용도지역코드명', '용도지역명', '용도지역', '지역구분', '지목', '구분'])), None)
 
-        matched_rows = pd.DataFrame()
+        if addr_col:
+            target_str = f"{main_no}-{sub_no}" if sub_no != "0" else main_no
+            matched = df_parcels[df_parcels[addr_col].astype(str).str.contains(target_str, na=False)]
+            
+            if not matched.empty:
+                if purp_col and not matched[purp_col].dropna().empty:
+                    found_purp = str(matched[purp_col].dropna().iloc[0]).strip()
+                if zoning_col and not matched[zoning_col].dropna().empty:
+                    found_zoning = str(matched[zoning_col].dropna().iloc[0]).strip()
 
-        # 조건 A: 대지위치 텍스트 검색 (지번 숫자 결합)
-        if addr_col and raw_address:
-            # 주소에서 핵심 지번 숫자 추출 (예: "중부동 410-1" -> "410")
-            num_parts = re.findall(r'\d+', raw_address)
-            if num_parts:
-                target_num = num_parts[0]
-                matched_rows = df_all[df_all[addr_col].astype(str).str.contains(target_num, na=False)]
-
-        # 조건 B: 시군구코드/법정동코드/번/지 검색
-        if matched_rows.empty and '시군구코드' in cols and '법정동코드' in cols:
-            cond = (df_all['시군구코드'].astype(str) == sigungu_cd) & (df_all['법정동코드'].astype(str) == bjdong_cd)
-            if '번' in cols and '지' in cols:
-                cond = cond & (df_all['번'].astype(str).isin([bun_int, bun_z])) & (df_all['지'].astype(str).isin([ji_int, ji_z]))
-            matched_rows = df_all[cond]
-
-        # 조건 C: PNU 매칭
-        if matched_rows.empty and ('PNU' in cols or 'pnu' in cols):
-            p_col = 'PNU' if 'PNU' in cols else 'pnu'
-            pnu_target = f"{sigungu_cd}{bjdong_cd}"
-            matched_rows = df_all[df_all[p_col].astype(str).str.startswith(pnu_target, na=False)]
-
-        if not matched_rows.empty:
-            row = matched_rows.iloc[0]
-            if purp_col and pd.notna(row.get(purp_col)):
-                found_purp = str(row[purp_col]).strip()
-            if zoning_col and pd.notna(row.get(zoning_col)):
-                found_zoning = str(row[zoning_col]).strip()
-
-            if found_purp or found_zoning:
-                return found_purp, found_zoning
-
-    # 2차: building_data.db SQLite 검색 (기존 로직 유지)
-    if os.path.exists(LOCAL_DB_PATH):
+    # 2. 로컬 SQLite DB 백업 검색 (CSV에서 완전히 찾지 못한 경우)
+    if (not found_purp or not found_zoning) and os.path.exists(LOCAL_DB_PATH):
         try:
             conn = sqlite3.connect(LOCAL_DB_PATH)
             cursor = conn.cursor()
-
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='building_info'")
             if cursor.fetchone():
                 cursor.execute("PRAGMA table_info(building_info)")
-                cols = [col[1] for col in cursor.fetchall()]
+                db_cols = [col[1] for col in cursor.fetchall()]
+                
+                db_purp_col = next((c for c in db_cols if any(k in c.lower() for k in ['주용도', 'mainpurpscdnm', '용도명', '건축물용도'])), None)
+                db_zoning_col = next((c for c in db_cols if any(k in c.lower() for k in ['용도지역', '지역구분', 'prposarea', '지목'])), None)
 
-                purp_col = next((c for c in cols if any(k in c.lower() for k in ['주용도', 'mainpurpscdnm', '용도명', '건축물용도'])), None)
-                zoning_col = next((c for c in cols if any(k in c.lower() for k in ['용도지역', '지역구분', 'prposarea', '지목'])), None)
+                bun_z = main_no.zfill(4)
+                ji_z = sub_no.zfill(4)
 
-                conditions = []
-                params = []
-
-                if '시군구코드' in cols and '법정동코드' in cols:
-                    conditions.append("시군구코드 = ? AND 법정동코드 = ?")
-                    params.extend([sigungu_cd, bjdong_cd])
-                    if '번' in cols and '지' in cols:
-                        conditions.append("(번 IN (?, ?) AND 지 IN (?, ?))")
-                        params.extend([bun_int, bun_z, ji_int, ji_z])
-                elif 'PNU' in cols or 'pnu' in cols:
-                    p_col = 'PNU' if 'PNU' in cols else 'pnu'
-                    conditions.append(f"{p_col} LIKE ?")
-                    params.append(f"{sigungu_cd}{bjdong_cd}%{bun_z}{ji_z}")
-
-                if conditions:
-                    where_clause = " WHERE " + " AND ".join(conditions)
-                    cursor.execute(f"SELECT * FROM building_info {where_clause} LIMIT 1", params)
-                    row = cursor.fetchone()
-                    if row:
-                        row_dict = dict(zip(cols, row))
-                        if purp_col and row_dict.get(purp_col):
-                            found_purp = str(row_dict[purp_col]).strip()
-                        if zoning_col and row_dict.get(zoning_col):
-                            found_zoning = str(row_dict[zoning_col]).strip()
+                cursor.execute(f"SELECT * FROM building_info WHERE (번 = ? OR 번 = ?) AND (지 = ? OR 지 = ?) LIMIT 1",
+                               (main_no, bun_z, sub_no, ji_z))
+                row = cursor.fetchone()
+                if row:
+                    row_dict = dict(zip(db_cols, row))
+                    if not found_purp and db_purp_col and row_dict.get(db_purp_col):
+                        found_purp = str(row_dict[db_purp_col]).strip()
+                    if not found_zoning and db_zoning_col and row_dict.get(db_zoning_col):
+                        found_zoning = str(row_dict[db_zoning_col]).strip()
             conn.close()
         except Exception:
             pass
@@ -501,15 +329,15 @@ if 'detected_zoning' not in st.session_state:
     st.session_state.detected_zoning = "제2종일반주거지역"
 
 # -----------------------------------------------------------------------------
-# 🎯 [카카오맵 API + 공공데이터 API + 깃허브 양산 CSV 로컬 DB 정밀 연동 로직]
+# 🎯 [양산시 로컬 CSV + 카카오 맵 정제 기반 통합 정밀 연동 로직]
 # -----------------------------------------------------------------------------
-if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 (API & 양산 CSV 연동)", key="api_lookup_btn"):
+if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 (로컬 CSV 통합 연동)", key="api_lookup_btn"):
     if not input_jibun:
         st.warning("⚠ 조회할 지번을 입력해주세요.")
     else:
-        with st.spinner("카카오맵 API 주소 정제 및 양산시 건축물대장 CSV/API 데이터베이스 통합 조회 중..."):
+        with st.spinner("카카오맵으로 주소를 정제하고 연동된 로컬 CSV 파일에서 데이터를 조회 중입니다..."):
             try:
-                # Step 1: 카카오맵 API를 통해 정확한 지번, 법정동코드, PNU 추출
+                # Step 1: 카카오맵 API를 통해 지도 위치 정제
                 url = "https://dapi.kakao.com/v2/local/search/address.json"
                 headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
                 params = {"query": input_jibun}
@@ -525,94 +353,23 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                     st.success(f"📍 **카카오맵 주소 정제 완료:** {exact_address}")
                     st.map(pd.DataFrame({'lat': [lat], 'lon': [lon]}), zoom=16)
 
-                    # 카카오맵 응답에서 PNU 고유 코드 구성요소 추출
-                    address_info = doc.get('address', {})
-                    b_code = address_info.get('b_code', '')              # 10자리 법정동코드
-                    mountain_yn = address_info.get('mountain_yn', 'N')   # 산 여부
-                    san_code = '2' if mountain_yn == 'Y' else '1'
-                    main_no = address_info.get('main_address_no', '0').zfill(4)
-                    sub_no = address_info.get('sub_address_no', '0').zfill(4)
-                    
-                    pnu = f"{b_code}{san_code}{main_no}{sub_no}"          # 19자리 PNU
-                    
-                    sigungu_cd = b_code[:5]
-                    bjdong_cd = b_code[5:]
-                    plat_gb_cd = '1' if mountain_yn == 'Y' else '0'
+                    # Step 2: 연동된 양산시 모든 로컬 CSV 파일 및 DB에서 주용도 / 용도지역 자동 조회
+                    real_main_purp, real_zoning = search_local_csv_and_db(input_jibun)
 
-                    # Step 2: 공공데이터포털 건축물대장 API (표제부) 실제 주용도 조회
-                    bld_api_url = "http://apis.data.go.kr/1613000/BldRnService_v2/getBrTitleInfo"
-                    bld_params = {
-                        'serviceKey': requests.utils.unquote(BUILDING_API_KEY),
-                        'sigunguCd': sigungu_cd,
-                        'bjdongCd': bjdong_cd,
-                        'platGbCd': plat_gb_cd,
-                        'bun': main_no,
-                        'ji': sub_no,
-                        'numOfRows': '5',
-                        'pageNo': '1'
-                    }
-                    
-                    real_main_purp = ""
-                    try:
-                        bld_res = requests.get(bld_api_url, params=bld_params, timeout=5)
-                        if bld_res.status_code == 200:
-                            root = ET.fromstring(bld_res.content)
-                            items = root.findall('.//item')
-                            if items:
-                                main_purp_elem = items[0].find('mainPurpsCdNm')
-                                if main_purp_elem is not None and main_purp_elem.text:
-                                    real_main_purp = main_purp_elem.text.strip()
-                    except Exception:
-                        pass
-
-                    # Step 3: 공공데이터포털 토지이용계획 API 실제 용도지역 조회
-                    land_api_url = "http://apis.data.go.kr/1611000/nsdi/LandUseService/attr/getLandUseAttr"
-                    land_params = {
-                        'serviceKey': requests.utils.unquote(LAND_API_KEY),
-                        'pnu': pnu,
-                        'format': 'json',
-                        'numOfRows': '10',
-                        'pageNo': '1'
-                    }
-                    
-                    real_zoning = ""
-                    try:
-                        land_res = requests.get(land_api_url, params=land_params, timeout=5)
-                        if land_res.status_code == 200:
-                            land_json = land_res.json()
-                            field_list = land_json.get('landUses', {}).get('field', [])
-                            for field in field_list:
-                                prpos_area_nm = field.get('prposAreaDstrcCodeNm', '')
-                                for z_opt in zoning_options:
-                                    if z_opt in prpos_area_nm:
-                                        real_zoning = z_opt
-                                        break
-                                if real_zoning:
-                                    break
-                    except Exception:
-                        pass
-
-                    # Step 4: [양산 CSV & 로컬 DB 교차 연동] API 조회 미응답/미등록 시 깃허브 양산 CSV 파일에서 정밀 검색
-                    local_purp, local_zoning = search_local_sqlite_or_csv(sigungu_cd, bjdong_cd, main_no, sub_no, exact_address)
-
-                    if not real_main_purp and local_purp:
-                        real_main_purp = local_purp
-                        st.info(f"💾 **[양산지역 CSV 연동 데이터]** 양산 건축물대장 CSV 파일에서 주용도를 불러왔습니다: `{local_purp}`")
-
-                    if not real_zoning and local_zoning:
-                        for z_opt in zoning_options:
-                            if z_opt in local_zoning:
-                                real_zoning = z_opt
-                                break
-                        if real_zoning:
-                            st.info(f"💾 **[양산지역 CSV 연동 데이터]** 양산 건축물대장 CSV 파일에서 용도지역을 불러왔습니다: `{real_zoning}`")
-
-                    # Step 5: 결과 자동 매칭 및 드롭다운 동기화
+                    # Step 3: 결과 자동 매칭 및 드롭다운 동기화
                     if real_zoning:
-                        st.session_state["main_zoning_select"] = real_zoning
-                        st.success(f"✅ **[용도지역 자동 매칭 완료]** 용도지역: `{real_zoning}`")
+                        matched_z = None
+                        for z_opt in zoning_options:
+                            if z_opt in real_zoning:
+                                matched_z = z_opt
+                                break
+                        if matched_z:
+                            st.session_state["main_zoning_select"] = matched_z
+                            st.success(f"✅ **[로컬 CSV 용도지역 자동 매칭]** 용도지역: `{matched_z}` ({real_zoning})")
+                        else:
+                            st.info(f"📋 **[조회된 용도지역]**: `{real_zoning}` (목록에서 수동선택 가능)")
                     else:
-                        st.info("💡 공공데이터 API 및 CSV 미등록 지역이므로 용도지역 목록에서 직접 선택해주세요.")
+                        st.info("💡 연동된 CSV 파일에 미등록된 지번입니다. 용도지역 목록에서 직접 선택해 주세요.")
 
                     if real_main_purp:
                         matched_bld = None
@@ -622,16 +379,16 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                                 break
                         if matched_bld:
                             st.session_state["main_bld_use_select"] = matched_bld
-                            st.success(f"✅ **[건축물대장 주용도 자동 매칭 완료]** 주용도: `{matched_bld}` ({real_main_purp})")
+                            st.success(f"✅ **[로컬 CSV 건축물 주용도 자동 매칭]** 주용도: `{matched_bld}` ({real_main_purp})")
                         else:
-                            st.info(f"📋 **[실제 건축물대장 주용도]**: `{real_main_purp}` (아래 목록에서 가장 가까운 항목 선택)")
+                            st.info(f"📋 **[실제 건축물 주용도]**: `{real_main_purp}` (가장 가까운 항목 선택)")
                     else:
-                        st.info("💡 공공데이터 API 및 CSV 미등록 필지이므로 주용도를 수동 선택해주세요.")
+                        st.info("💡 연동된 CSV 파일에 미등록된 필지이므로 주용도를 수동 선택해 주세요.")
 
                 else:
-                    st.error("⚠️ 카카오맵 API에서 지번을 찾을 수 없습니다. 정확한 지번(예: 양산시 중부동 410)을 입력하세요.")
+                    st.error("⚠️ 주소를 찾을 수 없습니다. 정확한 양산시 지번(예: 양산시 중부동 410)을 입력하세요.")
             except Exception as e:
-                st.error(f"API 연동 및 데이터 조회 중 오류가 발생했습니다: {e}")
+                st.error(f"로컬 CSV 연동 및 조회 중 오류가 발생했습니다: {e}")
 
 # 선택 박스: 용도지역과 건축물대장 주용도를 각각 독립적으로 선택 가능하도록 배치
 st.markdown("---")
@@ -658,17 +415,18 @@ with col_f1:
 with col_f2:
     has_school_zone = st.checkbox("🎓 학교환경위생정화구역 저촉 여부", value=False, key="main_school_zone_check")
 
-# 산단 지번별 자동 조회 변수
+# 산단 및 지역 지번별 자동 조회 변수
 selected_parcel_row = None
 auto_detected_code = ""
 auto_detected_name = ""
 
 if property_type == "산업단지 내 공장 (지번 조회)":
     st.markdown("---")
-    st.subheader("🏭 산단 지번별 허용 업종코드 자동 조회")
-    if df_parcels is not None:
-        jibun_col = '지번' if '지번' in df_parcels.columns else df_parcels.columns[0]
-        road_col = '도로명' if '도로명' in df_parcels.columns else df_parcels.columns[1] if len(df_parcels.columns) > 1 else jibun_col
+    st.subheader("🏭 산단 및 지역 지번별 허용 업종코드 자동 조회")
+    if df_parcels is not None and not df_parcels.empty:
+        cols = df_parcels.columns.tolist()
+        jibun_col = next((c for c in cols if any(k in c.lower() for k in ['지번', '소재지', '주소', '대지위치'])), cols[0])
+        road_col = next((c for c in cols if '도로' in c.lower()), cols[1] if len(cols) > 1 else jibun_col)
 
         if 'ind_search_kw' not in st.session_state:
             st.session_state.ind_search_kw = ""
@@ -692,20 +450,20 @@ if property_type == "산업단지 내 공장 (지번 조회)":
             f_df = df_parcels
         
         if len(f_df) > 0:
-            parcel_options = f_df[jibun_col].fillna('').astype(str).tolist()
+            parcel_options = f_df[jibun_col].fillna('').astype(str).unique().tolist()
             sel_addr = st.selectbox("조회된 필지(지번) 선택", parcel_options, key="ind_parcel_selectbox_field")
             selected_parcel_row = f_df[f_df[jibun_col].fillna('').astype(str) == sel_addr].iloc[0]
             
-            code_col = '허용 업종코드' if '허용 업종코드' in df_parcels.columns else (df_parcels.columns[2] if len(df_parcels.columns) > 2 else '')
-            name_col = '업종 명칭' if '업종 명칭' in df_parcels.columns else (df_parcels.columns[3] if len(df_parcels.columns) > 3 else '')
+            code_col = next((c for c in cols if '코드' in c or '업종' in c), cols[2] if len(cols) > 2 else '')
+            name_col = next((c for c in cols if '명' in c or '품목' in c), cols[3] if len(cols) > 3 else '')
             
             auto_detected_code = str(selected_parcel_row.get(code_col, ''))
             auto_detected_name = str(selected_parcel_row.get(name_col, ''))
-            st.success(f"🎯 **[지번 매칭 완료]** `{sel_addr}` (허용 업종코드: {auto_detected_code})")
+            st.success(f"🎯 **[지번 매칭 완료]** `{sel_addr}` (허용 업종코드/명칭: {auto_detected_code} {auto_detected_name})")
         else:
             st.warning("⚠ 일치하는 지번 또는 도로명이 없습니다. 검색어를 다시 확인해주세요.")
     else:
-        st.warning("⚠️ 산단 데이터 파일이 로드되지 않았습니다.")
+        st.warning("⚠️ 연동된 CSV 파일이 존재하지 않거나 로드되지 않았습니다.")
 
 st.markdown("---")
 st.subheader("🎯 3. 임차인 세부 희망 업종 및 조건 선택")
@@ -1125,7 +883,7 @@ if submitted:
             
             if target_biz and not code_match and not name_match:
                 fatal_errors.append(
-                    f"산단 관리기본계획 위반: 해당 지번의 한국산업단지공단(KICOX) 관리기본계획상 허용 업종코드(`{auto_detected_code}`)에 임차인 희망 업종('{target_biz}')이 포함되지 않습니다. "
+                    f"산단 관리기본계획 위반: 해당 지번의 한국산업단지공단(KICOX) 관리기본계획상 허용 업종코드/명칭(`{auto_detected_code} {auto_detected_name}`)에 임차인 희망 업종('{target_biz}')이 포함되지 않습니다. "
                     f"💡 **해결 대안:** 해당 지번에서는 입주계약 체결이 불가능합니다."
                 )
             else:
