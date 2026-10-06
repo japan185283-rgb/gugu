@@ -239,8 +239,8 @@ def search_local_csv_and_db(address_str):
     found_etc_purp = None
     found_zoning = None
     found_district_plan = None
-    found_bcv = None  # 대장상 건폐율
-    found_far = None  # 대장상 용적률
+    found_bcv = None  # 건폐율
+    found_far = None  # 용적률
 
     if not address_str:
         return None, None, None, None, None, None
@@ -668,17 +668,20 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                     else:
                         st.session_state["etc_purp_info"] = "해당없음 / 미등록"
 
-                    # Step 4: 건폐율 / 용적률 나대지 예외 처리 및 표시 (조례 기준 포함)
+                    # Step 4: 건폐율 / 용적률 나대지 예외 처리 및 표시 (조례 기준 동적 적용)
                     if not is_empty_land and real_bcv and not is_invalid_val(real_bcv) and real_far and not is_invalid_val(real_far):
                         st.session_state["bcv_info"] = real_bcv
                         st.session_state["far_info"] = real_far
                         st.success(f"📐 **[현재 건축물 건폐율/용적률 확인]** 건폐율: `{real_bcv}` / 용적률: `{real_far}`{zoning_limit_text}")
                     else:
-                        # 건물이 없는 나대지인 경우 조례 한도만 안내
-                        if is_empty_land and max_bcv and max_far:
-                            st.session_state["bcv_info"] = f"나대지 (조례 한도: {max_bcv})"
-                            st.session_state["far_info"] = f"나대지 (조례 한도: {max_far})"
-                            st.success(f"📐 **[나대지 신축 가능 한도]** 양산시 조례상 최대한도 - 건폐율: `{max_bcv}` / 용적률: `{max_far}`")
+                        # 건물이 없는 나대지인 경우 선택된 용도지역의 조례 한도 적용
+                        current_sel_zoning = st.session_state.get("main_zoning_select")
+                        if is_empty_land and current_sel_zoning and current_sel_zoning in yangsan_zoning_limits:
+                            m_bcv = yangsan_zoning_limits[current_sel_zoning]["max_bcv"]
+                            m_far = yangsan_zoning_limits[current_sel_zoning]["max_far"]
+                            st.session_state["bcv_info"] = f"나대지 (조례 한도: {m_bcv})"
+                            st.session_state["far_info"] = f"나대지 (조례 한도: {m_far})"
+                            st.success(f"📐 **[나대지 신축 가능 한도]** 양산시 조례상 최대한도 - 건폐율: `{m_bcv}` / 용적률: `{m_far}`")
                         else:
                             st.session_state["bcv_info"] = "정보없음"
                             st.session_state["far_info"] = "정보없음"
@@ -718,6 +721,12 @@ current_dp = st.session_state.get("district_plan_info", "해당없음 / 미지�
 current_etc = st.session_state.get("etc_purp_info", "해당없음 / 미등록")
 current_bcv = st.session_state.get("bcv_info", "정보없음")
 current_far = st.session_state.get("far_info", "정보없음")
+
+# UI 동적 업데이트를 위한 실시간 조례 적용 (나대지일 때 수동으로 용도지역 변경 시 상태 즉시 반영)
+if bld_use == "나대지(건축물없음)" and zoning in yangsan_zoning_limits:
+    current_bcv = f"나대지 (조례 한도: {yangsan_zoning_limits[zoning]['max_bcv']})"
+    current_far = f"나대지 (조례 한도: {yangsan_zoning_limits[zoning]['max_far']})"
+
 st.info(f"📋 **[현재 설정 상태]:** 용도지역(`{zoning}`) | 주용도(`{bld_use}`) | 기타용도(`{current_etc}`) | 건폐율(`{current_bcv}`) | 용적률(`{current_far}`) | 지구단위계획(`{current_dp}`)")
 
 col_f1, col_f2 = st.columns(2)
@@ -774,7 +783,7 @@ if property_type == "산업단지 내 공장 (지번 조회)":
         else:
             st.warning("⚠ 일치하는 지번 또는 도로명이 없습니다. 검색어를 다시 확인해주세요.")
     else:
-        st.warning("⚠️ 연동된 CSV 파일이 존재하지 않거나 로드되지 않았습니다.")
+        st.warning("⚠️️ 연동된 CSV 파일이 존재하지 않거나 로드되지 않았습니다.")
 
 st.markdown("---")
 st.subheader("🎯 3. 임차인 세부 희망 업종 및 건물 물리적 조건 선택")
@@ -947,7 +956,7 @@ if submitted:
             if bld_use not in ["제1종근린생활시설", "제2종근린생활시설", "판매시설", "숙박시설"]:
                 warnings.append(
                     f"[음식·휴게업 합법화 대안 - 식품위생법 제37조 / 건축법 제19조] 현재 건축물대장 주용도({bld_use})에서는 음식점 영업이 불가합니다. "
-                    f"💡 **[합법화 대안]** 건물 전체의 정화조 용량과 주차 대수가 허용하는 범위 내에서, 관할 관청에 **'건축물 표시변경(제2종근린생활시설 - 일반음식점)'**을 신청하여 대장상 용도를 변경하면 합법 허가를 받을 수 창습니다."
+                    f"💡 **[합법화 대안]** 건물 전체의 정화조 용량과 주차 대수가 허용하는 범위 내에서, 관할 관청에 **'건축물 표시변경(제2종근린생활시설 - 일반음식점)'**을 신청하여 대장상 용도를 변경하면 합법 허가를 받을 수 있습니다."
                 )
             else:
                 legal_actions.append("🍽 **[음식점 창업 적합]** 식품위생법에 따른 위생교육, 지하층 직통계단 및 그리스 트랩 설치 여부 확인.")
