@@ -99,6 +99,25 @@ zoning_options = [
     "보전녹지지역", "자연녹지지역", "계획관리지역"
 ]
 
+# 양산시 도시계획 조례 기준 상한선 데이터베이스 (건폐율, 용적률)
+yangsan_zoning_limits = {
+    "제1종전용주거지역": {"max_bcv": "50%", "max_far": "100%"},
+    "제2종전용주거지역": {"max_bcv": "50%", "max_far": "150%"},
+    "제1종일반주거지역": {"max_bcv": "60%", "max_far": "200%"},
+    "제2종일반주거지역": {"max_bcv": "60%", "max_far": "250%"},
+    "제3종일반주거지역": {"max_bcv": "50%", "max_far": "300%"},
+    "준주거지역": {"max_bcv": "70%", "max_far": "500%"},
+    "중심상업지역": {"max_bcv": "80%", "max_far": "1,300%"},
+    "일반상업지역": {"max_bcv": "80%", "max_far": "1,000%"},
+    "근린상업지역": {"max_bcv": "70%", "max_far": "800%"},
+    "전용공업지역": {"max_bcv": "70%", "max_far": "300%"},
+    "일반공업지역": {"max_bcv": "70%", "max_far": "350%"},
+    "준공업지역": {"max_bcv": "70%", "max_far": "400%"},
+    "보전녹지지역": {"max_bcv": "20%", "max_far": "80%"},
+    "자연녹지지역": {"max_bcv": "20%", "max_far": "80%"},
+    "계획관리지역": {"max_bcv": "40%", "max_far": "100%"},
+}
+
 def is_invalid_val(val):
     """0.0, NaN, None, 빈 문자열 등 무효 데이터를 필터링합니다."""
     if pd.isna(val):
@@ -220,8 +239,8 @@ def search_local_csv_and_db(address_str):
     found_etc_purp = None
     found_zoning = None
     found_district_plan = None
-    found_bcv = None  # 건폐율
-    found_far = None  # 용적률
+    found_bcv = None  # 대장상 건폐율
+    found_far = None  # 대장상 용적률
 
     if not address_str:
         return None, None, None, None, None, None
@@ -597,37 +616,21 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                     # Step 2: 연동된 양산시 모든 로컬 CSV 파일 및 DB에서 주용도 / 기타용도 / 용도지역 / 지구단위계획 / 건폐율 / 용적률 자동 조회
                     real_main_purp, real_zoning, real_district_plan, real_etc_purp, real_bcv, real_far = search_local_csv_and_db(input_jibun)
 
-                    # Step 3: 기타용도 확인 및 상태 저장
-                    if real_etc_purp and not is_invalid_val(real_etc_purp):
-                        st.session_state["etc_purp_info"] = real_etc_purp
-                        st.success(f"🏷️ **[건축물 기타용도 확인]** `{real_etc_purp}`")
-                    else:
-                        st.session_state["etc_purp_info"] = "해당없음 / 미등록"
-
-                    # Step 4: 건폐율 / 용적률 나대지 예외 처리 및 표시
-                    if real_bcv and not is_invalid_val(real_bcv) and real_far and not is_invalid_val(real_far):
-                        st.session_state["bcv_info"] = real_bcv
-                        st.session_state["far_info"] = real_far
-                        st.success(f"📐 **[건폐율/용적률 확인]** 건폐율: `{real_bcv}` / 용적률: `{real_far}`")
-                    else:
-                        # 건물이 없는 경우(나대지 등)
-                        st.session_state["bcv_info"] = "정보없음 (나대지/건축물없음)"
-                        st.session_state["far_info"] = "정보없음 (나대지/건축물없음)"
-                        st.info("💡 건축물대장상 건폐율 및 용적률 정보가 없습니다. 나대지이거나 미기재된 상태일 수 있습니다.")
-
-                    # Step 5: 지구단위계획 (제1종/제2종 등) 정보 자동 감지 및 상태 저장
-                    if real_district_plan:
-                        st.session_state["district_plan_info"] = real_district_plan
-                        st.success(f"🏗️ **[지구단위계획 확인]** `{real_district_plan}` 구역 지정 필지입니다.")
-                    else:
-                        st.session_state["district_plan_info"] = "해당없음 / 미지정"
-                        st.info("💡 일반 지구단위계획 미지정 필지입니다.")
-
-                    # 스마트 매칭 및 선택상자(Dropdown) 자동 동기화
+                    # 스마트 매칭 및 선택상자(Dropdown) 자동 동기화 (용도지역)
                     matched_z = map_zoning(real_zoning)
+                    
+                    # 조례상 기준 상한선 가져오기
+                    zoning_limit_text = ""
+                    max_bcv = ""
+                    max_far = ""
+                    if matched_z and matched_z in yangsan_zoning_limits:
+                        max_bcv = yangsan_zoning_limits[matched_z]["max_bcv"]
+                        max_far = yangsan_zoning_limits[matched_z]["max_far"]
+                        zoning_limit_text = f" (조례상 최대한도 - 건폐율: {max_bcv} / 용적률: {max_far})"
+
                     if matched_z:
                         st.session_state["main_zoning_select"] = matched_z
-                        st.success(f"✅ **[용도지역 자동 선택 완료]** `{matched_z}` (조회 데이터: {real_zoning})")
+                        st.success(f"✅ **[용도지역 자동 선택 완료]** `{matched_z}` (조회 데이터: {real_zoning}){zoning_limit_text}")
                     else:
                         if real_zoning and not is_invalid_val(real_zoning):
                             st.info(f"📋 **[조회된 용도지역]**: `{real_zoning}` → 목록에 정확히 일치하는 항목이 없어 직접 선택해 주세요.")
@@ -641,9 +644,11 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                     elif real_etc_purp and not is_invalid_val(real_etc_purp):
                         matched_bld = map_building_use(real_etc_purp)
                         
+                    is_empty_land = False
                     if not matched_bld and (not real_main_purp or is_invalid_val(real_main_purp)):
                         # 건물이 없는 경우 '나대지'로 처리
                         matched_bld = "나대지(건축물없음)"
+                        is_empty_land = True
                         st.session_state["main_bld_use_select"] = matched_bld
                         st.success("✅ **[건축물 주용도 자동 선택 완료]** 대장에 건축물 정보가 없어 `나대지(건축물없음)`로 자동 설정되었습니다.")
                     elif matched_bld:
@@ -655,6 +660,37 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                             st.info(f"📋 **[조회된 주용도 코드/원문]**: `{real_main_purp}` → 목록에서 가장 가까운 용도를 선택해 주세요.")
                         else:
                             st.info("💡 연동 데이터에 건축물 주용도 정보가 없거나 미등록 필지입니다. 목록에서 수동 선택해 주세요.")
+
+                    # Step 3: 기타용도 확인 및 상태 저장
+                    if not is_empty_land and real_etc_purp and not is_invalid_val(real_etc_purp):
+                        st.session_state["etc_purp_info"] = real_etc_purp
+                        st.success(f"🏷️ **[건축물 기타용도 확인]** `{real_etc_purp}`")
+                    else:
+                        st.session_state["etc_purp_info"] = "해당없음 / 미등록"
+
+                    # Step 4: 건폐율 / 용적률 나대지 예외 처리 및 표시 (조례 기준 포함)
+                    if not is_empty_land and real_bcv and not is_invalid_val(real_bcv) and real_far and not is_invalid_val(real_far):
+                        st.session_state["bcv_info"] = real_bcv
+                        st.session_state["far_info"] = real_far
+                        st.success(f"📐 **[현재 건축물 건폐율/용적률 확인]** 건폐율: `{real_bcv}` / 용적률: `{real_far}`{zoning_limit_text}")
+                    else:
+                        # 건물이 없는 나대지인 경우 조례 한도만 안내
+                        if is_empty_land and max_bcv and max_far:
+                            st.session_state["bcv_info"] = f"나대지 (조례 한도: {max_bcv})"
+                            st.session_state["far_info"] = f"나대지 (조례 한도: {max_far})"
+                            st.success(f"📐 **[나대지 신축 가능 한도]** 양산시 조례상 최대한도 - 건폐율: `{max_bcv}` / 용적률: `{max_far}`")
+                        else:
+                            st.session_state["bcv_info"] = "정보없음"
+                            st.session_state["far_info"] = "정보없음"
+                            st.info("💡 건축물대장상 건폐율 및 용적률 정보가 없습니다. 나대지이거나 미기재된 상태일 수 있습니다.")
+
+                    # Step 5: 지구단위계획 (제1종/제2종 등) 정보 자동 감지 및 상태 저장
+                    if real_district_plan:
+                        st.session_state["district_plan_info"] = real_district_plan
+                        st.success(f"🏗️ **[지구단위계획 확인]** `{real_district_plan}` 구역 지정 필지입니다.")
+                    else:
+                        st.session_state["district_plan_info"] = "해당없음 / 미지정"
+                        st.info("💡 일반 지구단위계획 미지정 필지입니다.")
 
                 else:
                     st.error("⚠️ 주소를 찾을 수 없습니다. 정확한 양산시 지번(예: 양산시 중부동 410)을 입력하세요.")
@@ -911,7 +947,7 @@ if submitted:
             if bld_use not in ["제1종근린생활시설", "제2종근린생활시설", "판매시설", "숙박시설"]:
                 warnings.append(
                     f"[음식·휴게업 합법화 대안 - 식품위생법 제37조 / 건축법 제19조] 현재 건축물대장 주용도({bld_use})에서는 음식점 영업이 불가합니다. "
-                    f"💡 **[합법화 대안]** 건물 전체의 정화조 용량과 주차 대수가 허용하는 범위 내에서, 관할 관청에 **'건축물 표시변경(제2종근린생활시설 - 일반음식점)'**을 신청하여 대장상 용도를 변경하면 합법 허가를 받을 수 있습니다."
+                    f"💡 **[합법화 대안]** 건물 전체의 정화조 용량과 주차 대수가 허용하는 범위 내에서, 관할 관청에 **'건축물 표시변경(제2종근린생활시설 - 일반음식점)'**을 신청하여 대장상 용도를 변경하면 합법 허가를 받을 수 창습니다."
                 )
             else:
                 legal_actions.append("🍽 **[음식점 창업 적합]** 식품위생법에 따른 위생교육, 지하층 직통계단 및 그리스 트랩 설치 여부 확인.")
