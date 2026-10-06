@@ -87,7 +87,8 @@ general_building_uses = [
     "자동차관련시설",
     "동물관련시설",
     "자원순환관련시설",
-    "단독/다세대/아파트(주택류)"
+    "단독/다세대/아파트(주택류)",
+    "나대지(건축물없음)"  # 나대지 추가
 ]
 
 # 용도지역 목록
@@ -603,18 +604,16 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                     else:
                         st.session_state["etc_purp_info"] = "해당없음 / 미등록"
 
-                    # Step 4: 건폐율 / 용적률 확인 및 상태 저장
-                    if real_bcv and not is_invalid_val(real_bcv):
+                    # Step 4: 건폐율 / 용적률 나대지 예외 처리 및 표시
+                    if real_bcv and not is_invalid_val(real_bcv) and real_far and not is_invalid_val(real_far):
                         st.session_state["bcv_info"] = real_bcv
-                        st.success(f"📐 **[건폐율 확인]** `{real_bcv}`")
-                    else:
-                        st.session_state["bcv_info"] = "정보없음"
-
-                    if real_far and not is_invalid_val(real_far):
                         st.session_state["far_info"] = real_far
-                        st.success(f"🏗️ **[용적률 확인]** `{real_far}`")
+                        st.success(f"📐 **[건폐율/용적률 확인]** 건폐율: `{real_bcv}` / 용적률: `{real_far}`")
                     else:
-                        st.session_state["far_info"] = "정보없음"
+                        # 건물이 없는 경우(나대지 등)
+                        st.session_state["bcv_info"] = "정보없음 (나대지/건축물없음)"
+                        st.session_state["far_info"] = "정보없음 (나대지/건축물없음)"
+                        st.info("💡 건축물대장상 건폐율 및 용적률 정보가 없습니다. 나대지이거나 미기재된 상태일 수 있습니다.")
 
                     # Step 5: 지구단위계획 (제1종/제2종 등) 정보 자동 감지 및 상태 저장
                     if real_district_plan:
@@ -635,12 +634,19 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                         else:
                             st.info("💡 연동 데이터에 용도지역 정보가 없거나 미등록 필지입니다. 용도지역 목록에서 선택해 주세요.")
 
-                    # 주용도 또는 기타용도를 기준으로 스마트 매칭
-                    matched_bld = map_building_use(real_main_purp)
-                    if not matched_bld and real_etc_purp:
+                    # 주용도 또는 기타용도를 기준으로 스마트 매칭 (나대지 예외 처리 포함)
+                    matched_bld = None
+                    if real_main_purp and not is_invalid_val(real_main_purp):
+                        matched_bld = map_building_use(real_main_purp)
+                    elif real_etc_purp and not is_invalid_val(real_etc_purp):
                         matched_bld = map_building_use(real_etc_purp)
-
-                    if matched_bld:
+                        
+                    if not matched_bld and (not real_main_purp or is_invalid_val(real_main_purp)):
+                        # 건물이 없는 경우 '나대지'로 처리
+                        matched_bld = "나대지(건축물없음)"
+                        st.session_state["main_bld_use_select"] = matched_bld
+                        st.success("✅ **[건축물 주용도 자동 선택 완료]** 대장에 건축물 정보가 없어 `나대지(건축물없음)`로 자동 설정되었습니다.")
+                    elif matched_bld:
                         st.session_state["main_bld_use_select"] = matched_bld
                         disp_src = real_main_purp if real_main_purp else f"기타용도({real_etc_purp})"
                         st.success(f"✅ **[건축물 주용도 자동 선택 완료]** `{matched_bld}` (조회 데이터: {disp_src})")
@@ -794,6 +800,13 @@ if submitted:
     warnings = []
     legal_actions = []
 
+    # 나대지 신축 가이드라인 특례 추가
+    if bld_use == "나대지(건축물없음)":
+        warnings.append(
+            f"🚧 **[나대지 신축 검토]** 해당 부지는 현재 건축물이 없는 나대지 상태입니다. "
+            f"'{target_biz}' 업종을 위한 신축 시, 해당 용도지역(`{zoning}`)의 양산시 조례상 건폐율/용적률 한도 및 도로 접도 조건, 건축선 후퇴 등을 관할 건축과와 필히 사전 협의해야 합니다."
+        )
+
     # 지구단위계획 특약 안내 추가
     dp_state = st.session_state.get("district_plan_info", "")
     if dp_state and dp_state != "해당없음 / 미지정":
@@ -860,7 +873,7 @@ if submitted:
             )
 
     # 4. 건축법 주용도 및 면적별 진단 로직 (건축법 제19조 및 동법 시행령 별표 1)
-    if property_type == "상가 / 일반 건축물":
+    if property_type == "상가 / 일반 건축물" and bld_use != "나대지(건축물없음)":
         if "세탁소" in target_biz:
             if bld_use != "제1종근린생활시설":
                 warnings.append(
@@ -1152,7 +1165,7 @@ if submitted:
             legal_actions.append(f"✅ **[{target_biz} 적합성 검토 완료]** 입력된 건축물 주용도({bld_use}) 및 면적({area}㎡) 기준 일반적인 건축법·국토계획법 요건에 부합합니다. 단, 양산시 조례 및 개별 지침을 최종 확인하세요.")
 
     else: # 산업단지 내 공장
-        if bld_use != "공장":
+        if bld_use != "공장" and bld_use != "나대지(건축물없음)":
             fatal_errors.append(
                 f"치명적 결격: 산업집적활성화 및 공장설립에 관한 법률(산집법) 제16조에 따라 산단 내 공장 등록을 위해서는 주용도가 무조건 **'공장'**이어야 합니다. (현재 주용도: {bld_use}) "
                 f"💡 **해결 대안:** 다른 공장 물건을 선택해야 합니다."
@@ -1215,7 +1228,7 @@ if submitted:
             st.markdown("---")
             
         if legal_actions:
-            st.markdown("### 🛠️️ [실무 법적 조치 및 상세 가이드]")
+            st.markdown("### 🛠 [실무 법적 조치 및 상세 가이드]")
             report_text_lines.append("\n[🛠️ 실무 법적 조치 가이드]")
             for act in legal_actions: 
                 st.markdown(f"- {act}")
