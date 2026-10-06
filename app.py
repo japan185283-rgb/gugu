@@ -96,27 +96,132 @@ zoning_options = [
     "제1종전용주거지역", "제2종전용주거지역", "제1종일반주거지역", "제2종일반주거지역", "제3종일반주거지역",
     "준주거지역", "중심상업지역", "일반상업지역", "근린상업지역",
     "전용공업지역", "일반공업지역", "준공업지역",
-    "보전녹지지역", "자연녹지지역", "계획관리지역"
+    "보전녹지지역", "자연녹지지역", "계획관리지역",
+    "생산녹지지역", "보전관리지역", "생산관리지역", "농림지역", "자연환경보전지역"
 ]
 
-# 양산시 도시계획 조례 기준 상한선 데이터베이스 (건폐율, 용적률)
-yangsan_zoning_limits = {
-    "제1종전용주거지역": {"max_bcv": "50%", "max_far": "100%"},
-    "제2종전용주거지역": {"max_bcv": "50%", "max_far": "150%"},
-    "제1종일반주거지역": {"max_bcv": "60%", "max_far": "200%"},
-    "제2종일반주거지역": {"max_bcv": "60%", "max_far": "250%"},
-    "제3종일반주거지역": {"max_bcv": "50%", "max_far": "300%"},
-    "준주거지역": {"max_bcv": "70%", "max_far": "500%"},
-    "중심상업지역": {"max_bcv": "80%", "max_far": "1,300%"},
-    "일반상업지역": {"max_bcv": "80%", "max_far": "1,000%"},
-    "근린상업지역": {"max_bcv": "70%", "max_far": "800%"},
-    "전용공업지역": {"max_bcv": "70%", "max_far": "300%"},
-    "일반공업지역": {"max_bcv": "70%", "max_far": "350%"},
-    "준공업지역": {"max_bcv": "70%", "max_far": "400%"},
-    "보전녹지지역": {"max_bcv": "20%", "max_far": "80%"},
-    "자연녹지지역": {"max_bcv": "20%", "max_far": "80%"},
-    "계획관리지역": {"max_bcv": "40%", "max_far": "100%"},
+# 양산시 도시계획 조례 기준 원칙 상한선 데이터베이스 (건폐율, 용적률)
+yangsan_zoning_limits_base = {
+    "제1종전용주거지역": {"bcv": 50, "far": 100},
+    "제2종전용주거지역": {"bcv": 40, "far": 150},
+    "제1종일반주거지역": {"bcv": 60, "far": 200},
+    "제2종일반주거지역": {"bcv": 60, "far": 220},
+    "제3종일반주거지역": {"bcv": 50, "far": 250},
+    "준주거지역": {"bcv": 70, "far": 400},
+    "중심상업지역": {"bcv": 80, "far": 1300},
+    "일반상업지역": {"bcv": 80, "far": 1000},
+    "근린상업지역": {"bcv": 70, "far": 800},
+    "유통상업지역": {"bcv": 70, "far": 700},
+    "전용공업지역": {"bcv": 70, "far": 250},
+    "일반공업지역": {"bcv": 70, "far": 300},
+    "준공업지역": {"bcv": 70, "far": 350},
+    "보전녹지지역": {"bcv": 20, "far": 80},
+    "생산녹지지역": {"bcv": 20, "far": 100},
+    "자연녹지지역": {"bcv": 20, "far": 100},
+    "보전관리지역": {"bcv": 20, "far": 80},
+    "생산관리지역": {"bcv": 20, "far": 80},
+    "계획관리지역": {"bcv": 40, "far": 100},
+    "농림지역": {"bcv": 20, "far": 80},
+    "자연환경보전지역": {"bcv": 20, "far": 80},
 }
+
+def calculate_dynamic_limits(zoning, all_districts_text, target_biz):
+    """
+    양산시 도시계획 조례(제55조~제62조)에 근거하여 해당 필지의 복합적인 
+    용도지구/구역 중첩 상태와 희망 업종을 분석하여 실질 건폐율/용적률 상한을 계산합니다.
+    """
+    if zoning not in yangsan_zoning_limits_base:
+        return None, None, "미등록 용도지역"
+
+    base_bcv = yangsan_zoning_limits_base[zoning]["bcv"]
+    base_far = yangsan_zoning_limits_base[zoning]["far"]
+    
+    final_bcv = base_bcv
+    final_far = base_far
+    reasons = []
+
+    is_urban_area = "주거" in zoning or "상업" in zoning or "공업" in zoning or "녹지" in zoning
+    all_text_clean = str(all_districts_text).replace(" ", "")
+
+    # 1. 특례 및 완화 (우선 적용되는 강행/특례 규정)
+    
+    # 산업단지 특례 (제55조 22항 및 제60조 1항 단서)
+    if "산업단지" in all_text_clean or "농공단지" in all_text_clean:
+        if "공업" in zoning:
+            final_bcv = 80  # 제56조 6호: 공업지역 내 국가/일반/첨단/준산업단지 80%
+            if zoning == "전용공업지역": final_far = 300
+            elif zoning == "일반공업지역": final_far = 350
+            elif zoning == "준공업지역": final_far = 400
+            reasons.append("산업단지 특례(공업지역) 적용")
+        elif "농공단지" in all_text_clean and not is_urban_area:
+            final_bcv = 70
+            final_far = 150
+            reasons.append("농공단지 특례(도시외지역) 적용")
+            
+    # 취락지구 완화 (제56조 1호)
+    if "취락지구" in all_text_clean:
+        final_bcv = max(final_bcv, 60)
+        reasons.append("취락지구 건폐율 60% 완화")
+
+    # 수산자원보호구역 특례 (제56조 3호, 제61조 2호)
+    if "수산자원보호구역" in all_text_clean:
+        final_bcv = 40
+        final_far = 80
+        reasons.append("수산자원보호구역 특례")
+
+    # 자연공원 특례 (제56조 4호, 제61조 3호)
+    if "자연공원" in all_text_clean:
+        final_bcv = 60
+        final_far = 100
+        reasons.append("자연공원 특례")
+
+    # 개발진흥지구 완화 (제56조 2호, 제61조 1호)
+    if "개발진흥지구" in all_text_clean:
+        if not is_urban_area:
+            final_bcv = max(final_bcv, 40)
+            final_far = max(final_far, 100)
+            if zoning == "계획관리지역" and "산업유통개발진흥지구" in all_text_clean:
+                final_bcv = 60
+                reasons.append("계획관리지역 내 산업·유통개발진흥지구 건폐율 60% 완화")
+            else:
+                reasons.append("도시외지역 개발진흥지구 특례")
+        elif zoning == "자연녹지지역":
+            final_bcv = max(final_bcv, 30)
+            reasons.append("자연녹지지역 내 개발진흥지구 건폐율 30% 완화")
+
+    # 방화지구 완화 (제58조 1항)
+    if "방화지구" in all_text_clean and zoning in ["준주거지역", "일반상업지역", "근린상업지역"]:
+        final_bcv = 80
+        reasons.append(f"{zoning} 내 방화지구 건폐율 80% 완화")
+
+    # 방재지구 완화 (제58조 6항, 제60조 4항 - 재해저감대책 시)
+    if "방재지구" in all_text_clean:
+        reasons.append("방재지구 내 재해저감대책 수립 시 건폐율 120%, 용적률 140% 상향 가능")
+
+    # 업종 기반 특례 (전통시장, 주유소 등)
+    if "전통시장" in target_biz or "상점가" in target_biz:
+        if zoning in ["제1종일반주거지역", "제2종일반주거지역", "제3종일반주거지역", "준주거지역", "준공업지역"]:
+            final_bcv = max(final_bcv, 70)
+            if "주거" in zoning: final_far = 500
+            if "공업" in zoning: final_far = 400
+            reasons.append("전통시장 및 상점가 특례 완화")
+        elif "상업" in zoning:
+            final_bcv = max(final_bcv, 90)
+            reasons.append("전통시장 및 상점가 상업지역 건폐율 90% 완화")
+            
+    if "주유소" in target_biz or "세차장" in target_biz:
+        if zoning == "자연녹지지역":
+            final_bcv = max(final_bcv, 30)
+            reasons.append("자연녹지지역 주유소/충전소 건폐율 30% 완화")
+
+    bcv_str = f"{final_bcv}%"
+    far_str = f"{final_far}%"
+    
+    if reasons:
+        reason_txt = " + ".join(reasons)
+        return bcv_str, far_str, f"조례 특례 적용: {reason_txt}"
+    else:
+        return bcv_str, far_str, "양산시 조례 원칙 적용"
 
 def is_invalid_val(val):
     """0.0, NaN, None, 빈 문자열 등 무효 데이터를 필터링합니다."""
@@ -222,28 +327,36 @@ def map_zoning(val_str):
     if "중심상업" in val_str: return "중심상업지역"
     if "일반상업" in val_str: return "일반상업지역"
     if "근린상업" in val_str: return "근린상업지역"
+    if "유통상업" in val_str: return "유통상업지역"
     if "전용공업" in val_str: return "전용공업지역"
     if "일반공업" in val_str: return "일반공업지역"
     if "준공업" in val_str: return "준공업지역"
     if "보전녹지" in val_str: return "보전녹지지역"
     if "자연녹지" in val_str: return "자연녹지지역"
+    if "생산녹지" in val_str: return "생산녹지지역"
     if "계획관리" in val_str: return "계획관리지역"
+    if "보전관리" in val_str: return "보전관리지역"
+    if "생산관리" in val_str: return "생산관리지역"
+    if "농림" in val_str: return "농림지역"
+    if "자연환경" in val_str: return "자연환경보전지역"
 
     return None
 
 def search_local_csv_and_db(address_str):
     """
-    폴더에 포함된 모든 양산시 CSV(표제부 및 지역지구구역) 및 SQLite DB에서 유효한 주용도, 기타용도, 용도지역, 지구단위계획(1종/2종), 건폐율 및 용적률을 검색합니다.
+    폴더에 포함된 모든 양산시 CSV(표제부 및 지역지구구역) 및 SQLite DB에서 유효한 주용도, 기타용도, 용도지역, 지구단위계획(1종/2종), 
+    건폐율, 용적률 및 필지에 지정된 모든 지역지구 텍스트 정보를 검색합니다.
     """
     found_purp = None
     found_etc_purp = None
     found_zoning = None
     found_district_plan = None
-    found_bcv = None  # 건폐율
-    found_far = None  # 용적률
+    found_bcv = None  # 대장상 건폐율
+    found_far = None  # 대장상 용적률
+    all_districts_text = "" # 복합 규제 분석을 위한 전체 지정 구역 텍스트
 
     if not address_str:
-        return None, None, None, None, None, None
+        return None, None, None, None, None, None, ""
 
     # 주소 키워드 토큰화 (예: '중부동 410-1' -> ['중부동', '410-1'])
     clean_addr = re.sub(r'[^\w\s-]', '', address_str).strip()
@@ -291,6 +404,10 @@ def search_local_csv_and_db(address_str):
 
         if not matched_rows.empty:
             matched_rows = matched_rows.drop_duplicates()
+
+            # 전체 구역 텍스트 수집 (조례 완화/강화 분석용)
+            all_text_arr = [str(x) for x in matched_rows.values.flatten() if pd.notna(x)]
+            all_districts_text = " ".join(all_text_arr)
 
             # 건축물 주용도 추출
             purp_cols = [c for c in cols if any(k in c.lower() for k in ['주용도코드명', '주용도명', '주용도', '건축물용도', '용도']) and '기타' not in c]
@@ -349,13 +466,12 @@ def search_local_csv_and_db(address_str):
                     break
 
             # 지구단위계획(제1종/제2종) 전체 셀 검색
-            all_text = " ".join([str(x) for x in matched_rows.values.flatten() if pd.notna(x)])
-            if "1종지구단위계획" in all_text or "제1종지구단위계획" in all_text:
+            if "1종지구단위계획" in all_districts_text or "제1종지구단위계획" in all_districts_text:
                 found_district_plan = "제1종지구단위계획"
-            elif "2종지구단위계획" in all_text or "제2종지구단위계획" in all_text:
+            elif "2종지구단위계획" in all_districts_text or "제2종지구단위계획" in all_districts_text:
                 found_district_plan = "제2종지구단위계획"
-            elif "지구단위계획" in all_text:
-                dp_match = re.search(r'([가-힣0-9a-zA-A]*지구단위계획[가-힣0-9a-zA-A]*)', all_text)
+            elif "지구단위계획" in all_districts_text:
+                dp_match = re.search(r'([가-힣0-9a-zA-A]*지구단위계획[가-힣0-9a-zA-A]*)', all_districts_text)
                 found_district_plan = dp_match.group(1) if dp_match else "지구단위계획구역"
 
     # 2. 로컬 SQLite DB 백업 검색
@@ -399,8 +515,9 @@ def search_local_csv_and_db(address_str):
                             val_str = str(row_dict[db_far_col]).strip()
                             found_far = val_str + "%" if not val_str.endswith("%") else val_str
                         
+                        row_str = " ".join([str(v) for v in row if v is not None])
+                        all_districts_text += " " + row_str
                         if not found_district_plan:
-                            row_str = " ".join([str(v) for v in row if v is not None])
                             if "1종지구단위계획" in row_str or "제1종지구단위계획" in row_str:
                                 found_district_plan = "제1종지구단위계획"
                             elif "2종지구단위계획" in row_str or "제2종지구단위계획" in row_str:
@@ -411,7 +528,7 @@ def search_local_csv_and_db(address_str):
         except Exception:
             pass
 
-    return found_purp, found_zoning, found_district_plan, found_etc_purp, found_bcv, found_far
+    return found_purp, found_zoning, found_district_plan, found_etc_purp, found_bcv, found_far, all_districts_text
 
 
 # 용도지역별 기본 금지 업종 (국토계획법 시행령 별표)
@@ -587,6 +704,8 @@ if 'bcv_info' not in st.session_state:
     st.session_state["bcv_info"] = "정보없음"
 if 'far_info' not in st.session_state:
     st.session_state["far_info"] = "정보없음"
+if 'zoning_reason_info' not in st.session_state:
+    st.session_state["zoning_reason_info"] = ""
 
 # -----------------------------------------------------------------------------
 # 🎯 [양산시 로컬 CSV + 카카오 맵 정제 기반 통합 정밀 연동 로직]
@@ -613,24 +732,15 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                     st.success(f"📍 **카카오맵 주소 정제 완료:** {exact_address}")
                     st.map(pd.DataFrame({'lat': [lat], 'lon': [lon]}), zoom=16)
 
-                    # Step 2: 연동된 양산시 모든 로컬 CSV 파일 및 DB에서 주용도 / 기타용도 / 용도지역 / 지구단위계획 / 건폐율 / 용적률 자동 조회
-                    real_main_purp, real_zoning, real_district_plan, real_etc_purp, real_bcv, real_far = search_local_csv_and_db(input_jibun)
+                    # Step 2: 연동된 양산시 모든 로컬 CSV 파일 및 DB에서 데이터 자동 조회
+                    real_main_purp, real_zoning, real_district_plan, real_etc_purp, real_bcv, real_far, all_districts_text = search_local_csv_and_db(input_jibun)
 
                     # 스마트 매칭 및 선택상자(Dropdown) 자동 동기화 (용도지역)
                     matched_z = map_zoning(real_zoning)
                     
-                    # 조례상 기준 상한선 가져오기
-                    zoning_limit_text = ""
-                    max_bcv = ""
-                    max_far = ""
-                    if matched_z and matched_z in yangsan_zoning_limits:
-                        max_bcv = yangsan_zoning_limits[matched_z]["max_bcv"]
-                        max_far = yangsan_zoning_limits[matched_z]["max_far"]
-                        zoning_limit_text = f" (조례상 최대한도 - 건폐율: {max_bcv} / 용적률: {max_far})"
-
                     if matched_z:
                         st.session_state["main_zoning_select"] = matched_z
-                        st.success(f"✅ **[용도지역 자동 선택 완료]** `{matched_z}` (조회 데이터: {real_zoning}){zoning_limit_text}")
+                        st.success(f"✅ **[용도지역 자동 선택 완료]** `{matched_z}` (조회 데이터: {real_zoning})")
                     else:
                         if real_zoning and not is_invalid_val(real_zoning):
                             st.info(f"📋 **[조회된 용도지역]**: `{real_zoning}` → 목록에 정확히 일치하는 항목이 없어 직접 선택해 주세요.")
@@ -668,20 +778,28 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                     else:
                         st.session_state["etc_purp_info"] = "해당없음 / 미등록"
 
-                    # Step 4: 건폐율 / 용적률 나대지 예외 처리 및 표시 (조례 기준 동적 적용)
+                    # Step 4: 건폐율 / 용적률 조례 심층 분석 (완화/특례 자동 적용)
+                    current_sel_zoning = st.session_state.get("main_zoning_select")
+                    target_b = st.session_state.get("main_target_biz_select", "")
+                    
+                    zoning_limit_text = ""
+                    if current_sel_zoning:
+                        m_bcv, m_far, reason = calculate_dynamic_limits(current_sel_zoning, all_districts_text, target_b)
+                        if m_bcv:
+                            st.session_state["zoning_reason_info"] = reason
+                            zoning_limit_text = f" (조례상 최대한도 - 건폐율: {m_bcv} / 용적률: {m_far})"
+                    
+                    # 건물 존재 여부에 따른 표시 분기
                     if not is_empty_land and real_bcv and not is_invalid_val(real_bcv) and real_far and not is_invalid_val(real_far):
                         st.session_state["bcv_info"] = real_bcv
                         st.session_state["far_info"] = real_far
-                        st.success(f"📐 **[현재 건축물 건폐율/용적률 확인]** 건폐율: `{real_bcv}` / 용적률: `{real_far}`{zoning_limit_text}")
+                        st.success(f"📐 **[현재 건축물 건폐율/용적률 확인]** 건폐율: `{real_bcv}` / 용적률: `{real_far}`\n\n💡 {zoning_limit_text}\n- 적용 근거: {st.session_state['zoning_reason_info']}")
                     else:
                         # 건물이 없는 나대지인 경우 선택된 용도지역의 조례 한도 적용
-                        current_sel_zoning = st.session_state.get("main_zoning_select")
-                        if is_empty_land and current_sel_zoning and current_sel_zoning in yangsan_zoning_limits:
-                            m_bcv = yangsan_zoning_limits[current_sel_zoning]["max_bcv"]
-                            m_far = yangsan_zoning_limits[current_sel_zoning]["max_far"]
+                        if is_empty_land and current_sel_zoning and m_bcv:
                             st.session_state["bcv_info"] = f"나대지 (조례 한도: {m_bcv})"
                             st.session_state["far_info"] = f"나대지 (조례 한도: {m_far})"
-                            st.success(f"📐 **[나대지 신축 가능 한도]** 양산시 조례상 최대한도 - 건폐율: `{m_bcv}` / 용적률: `{m_far}`")
+                            st.success(f"📐 **[나대지 신축 가능 한도]** 양산시 조례상 최대한도 - 건폐율: `{m_bcv}` / 용적률: `{m_far}`\n\n- 적용 근거: {st.session_state['zoning_reason_info']}")
                         else:
                             st.session_state["bcv_info"] = "정보없음"
                             st.session_state["far_info"] = "정보없음"
@@ -721,11 +839,13 @@ current_dp = st.session_state.get("district_plan_info", "해당없음 / 미지�
 current_etc = st.session_state.get("etc_purp_info", "해당없음 / 미등록")
 current_bcv = st.session_state.get("bcv_info", "정보없음")
 current_far = st.session_state.get("far_info", "정보없음")
+current_reason = st.session_state.get("zoning_reason_info", "")
 
 # UI 동적 업데이트를 위한 실시간 조례 적용 (나대지일 때 수동으로 용도지역 변경 시 상태 즉시 반영)
-if bld_use == "나대지(건축물없음)" and zoning in yangsan_zoning_limits:
-    current_bcv = f"나대지 (조례 한도: {yangsan_zoning_limits[zoning]['max_bcv']})"
-    current_far = f"나대지 (조례 한도: {yangsan_zoning_limits[zoning]['max_far']})"
+if bld_use == "나대지(건축물없음)" and zoning in yangsan_zoning_limits_base:
+    # 수동 변경 시 원칙 기준 표시
+    current_bcv = f"나대지 (조례 한도: {yangsan_zoning_limits_base[zoning]['bcv']}%)"
+    current_far = f"나대지 (조례 한도: {yangsan_zoning_limits_base[zoning]['far']}%)"
 
 st.info(f"📋 **[현재 설정 상태]:** 용도지역(`{zoning}`) | 주용도(`{bld_use}`) | 기타용도(`{current_etc}`) | 건폐율(`{current_bcv}`) | 용적률(`{current_far}`) | 지구단위계획(`{current_dp}`)")
 
@@ -783,7 +903,7 @@ if property_type == "산업단지 내 공장 (지번 조회)":
         else:
             st.warning("⚠ 일치하는 지번 또는 도로명이 없습니다. 검색어를 다시 확인해주세요.")
     else:
-        st.warning("⚠️️ 연동된 CSV 파일이 존재하지 않거나 로드되지 않았습니다.")
+        st.warning("⚠️ 연동된 CSV 파일이 존재하지 않거나 로드되지 않았습니다.")
 
 st.markdown("---")
 st.subheader("🎯 3. 임차인 세부 희망 업종 및 건물 물리적 조건 선택")
@@ -956,7 +1076,7 @@ if submitted:
             if bld_use not in ["제1종근린생활시설", "제2종근린생활시설", "판매시설", "숙박시설"]:
                 warnings.append(
                     f"[음식·휴게업 합법화 대안 - 식품위생법 제37조 / 건축법 제19조] 현재 건축물대장 주용도({bld_use})에서는 음식점 영업이 불가합니다. "
-                    f"💡 **[합법화 대안]** 건물 전체의 정화조 용량과 주차 대수가 허용하는 범위 내에서, 관할 관청에 **'건축물 표시변경(제2종근린생활시설 - 일반음식점)'**을 신청하여 대장상 용도를 변경하면 합법 허가를 받을 수 있습니다."
+                    f"💡 **[합법화 대안]** 건물 전체 정화조 용량과 주차 대수가 허용하는 범위 내에서, 관할 관청에 **'건축물 표시변경(제2종근린생활시설 - 일반음식점)'**을 신청하여 대장상 용도를 변경하면 합법 허가를 받을 수 있습니다."
                 )
             else:
                 legal_actions.append("🍽 **[음식점 창업 적합]** 식품위생법에 따른 위생교육, 지하층 직통계단 및 그리스 트랩 설치 여부 확인.")
