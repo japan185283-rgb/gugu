@@ -223,6 +223,84 @@ def calculate_dynamic_limits(zoning, all_districts_text, target_biz):
     else:
         return bcv_str, far_str, "양산시 조례 원칙 적용"
 
+def get_building_restriction_info(zoning, all_districts_text):
+    """
+    양산시 도시계획 조례 제31조~제37조에 따른 건축제한 및 예외 규정을 동적으로 판별합니다.
+    """
+    restrictions = []
+    
+    if not zoning:
+        return []
+
+    # [조례 제31조] 용도지역별 건축제한 (원칙 표기)
+    base_restrictions = {
+        "제1종전용주거지역": "단독주택 및 양호한 주거환경을 위한 시설 위주로 허용 (조례 별표1). 일반 상가 및 유흥시설 건축 불가.",
+        "제2종전용주거지역": "공동주택 중심 양호한 주거환경 보호 목적 (조례 별표2).",
+        "제1종일반주거지역": "저층주택 및 근린생활시설 건축 가능 (조례 별표3). 소음·악취 유발 공장 제한.",
+        "제2종일반주거지역": "중층주택 중심 정주환경 보호. 유흥/위락시설 건축 차단 (조례 별표4).",
+        "제3종일반주거지역": "고층 공동주택 밀집지역으로 대규모 인파 유입 시설 제한 (조례 별표5).",
+        "준주거지역": "주거와 상업 기능 혼재. 일부 숙박/위락시설 제한 (조례 별표6).",
+        "중심상업지역": "업무/상업 중심지. 대부분 업종 허용되나 주차장/소방 요건 충족 필요 (조례 별표7).",
+        "일반상업지역": "일반적인 판매/서비스/위락 시설 허용 지역 (조례 별표8).",
+        "근린상업지역": "주거지역 인접 상업지구. 대형 유흥/위락 업종 제한 가능성 있음 (조례 별표9).",
+        "전용공업지역": "중화학 공장 전용 구역. 일반 근린생활/주거/상업시설 건축 원천 금지 (조례 별표11).",
+        "일반공업지역": "공장 및 지식산업센터 위주. 대형 상업/숙박시설 제한 (조례 별표12).",
+        "준공업지역": "경공업 및 주거/상업 복합. 아파트형 공장 지원시설 비율 제한 적용 (조례 별표13).",
+        "보전녹지지역": "자연환경 보전 목적. 건축 및 영업 행위 극도 제한 (조례 별표14).",
+        "생산녹지지역": "농업적 생산을 위해 개발 유보. 농업 관련 시설 위주 허용 (조례 별표15).",
+        "자연녹지지역": "제한적 개발 허용. 성장관리방안 유무에 따라 입점 심사 차등 (조례 별표16).",
+        "보전관리지역": "자연환경 및 산림 보전 목적. 제한적 범위 내 시설만 허용 (조례 별표17).",
+        "생산관리지역": "농림/어업 생산 보전 목적이나 농업 관련 가공시설 등 일부 허용 (조례 별표18).",
+        "계획관리지역": "도시지역 편입 예상지. 배출시설 기준 충족 시 공장/근생 허용폭이 넓음 (조례 별표19).",
+        "농림지역": "농림업 진흥 목적. 농어가 주택 및 관련 창고 위주 허용 (조례 별표20).",
+        "자연환경보전지역": "수자원/생태계 보전 목적. 건축 규제 최고 수위 (조례 별표21)."
+    }
+    
+    if zoning in base_restrictions:
+        restrictions.append(f"✅ **[원칙] {zoning} 건축제한**: {base_restrictions[zoning]}")
+
+    all_text_clean = str(all_districts_text).replace(" ", "")
+
+    # [조례 제32조] 용도지역에서의 건축제한 특례 (생산관리지역 + 농촌융복합시설)
+    if "생산관리지역" in zoning and "농촌융복합" in all_text_clean: # 키워드가 있을 경우 예시
+        restrictions.append("💡 **[조례 제32조 특례]** 생산관리지역이라도 '농촌융복합시설'로 인정받는 경우 휴게/일반음식점, 제과점, 전시장(박물관 등) 건축이 예외적으로 허용됩니다.")
+
+    # [조례 제33조] 자연경관지구에서의 용도제한
+    if "자연경관지구" in all_text_clean:
+        restrictions.append("🚫 **[조례 제33조 규제] 자연경관지구 중첩**: 아파트, 제2종근생, 집회장, 판매/운수/숙박/위락/공장/창고/위험물/자동차/자원순환 시설의 건축이 원칙적으로 불가합니다.")
+
+    # [조례 제35조] 특화경관지구에서의 용도제한
+    if "특화경관지구" in all_text_clean:
+        restrictions.append("🚫 **[조례 제35조 규제] 특화경관지구 중첩**: 공동주택, 대형 제1종근생(500㎡이상), 제2종근생, 관람장, 일반숙박, 공장, 창고 등의 건축이 강하게 제한됩니다.")
+
+    # [조례 제36조] 시가지경관지구에서의 용도제한
+    if "시가지경관지구" in all_text_clean:
+        restrictions.append("🚫 **[조례 제36조 규제] 시가지경관지구 중첩**: 공장, 창고, 위험물저장, 자동차관련시설, 축사, 묘지시설 등의 건축을 할 수 없습니다.")
+
+    # [조례 제37조] 전통경관지구에서의 용도제한
+    if "전통경관지구" in all_text_clean:
+        restrictions.append("🚫 **[조례 제37조 규제] 전통경관지구 중첩**: 공동주택, 제2종근생, 판매, 숙박, 위락, 공장, 대형창고(500㎡초과) 등의 건축이 금지됩니다.")
+
+    # [조례 제49조] 중요시설물보호지구에서의 건축제한
+    if "중요시설물보호지구" in all_text_clean:
+        restrictions.append("🚫 **[조례 제49조 규제] 중요시설물보호지구 중첩**: 단독/공동주택, 종교시설, 위락시설, 공장, 노유자/수련시설, 창고 등의 건축이 금지됩니다.")
+
+    # [조례 제51조] 특정용도제한지구에서의 건축제한
+    if "특정용도제한지구" in all_text_clean:
+        restrictions.append("🚫 **[조례 제51조 규제] 특정용도제한지구 중첩**: 안마시술소, 단란주점, 판매/의료(요양병원)/숙박/위락/공장/창고 및 장례식장 건축이 원천 차단됩니다.")
+
+    # [조례 제51조의2] 복합용도지구 완화 특례
+    if "복합용도지구" in all_text_clean:
+        if "일반주거지역" in zoning:
+            restrictions.append("💡 **[조례 제51조의2 완화] 복합용도지구 (주거)**: 일반주거지역이나 준주거지역 수준으로 허용 용도가 확대됩니다. (단, 안마시술소, 공장 등 일부는 여전히 제외)")
+        elif "일반공업지역" in zoning:
+            restrictions.append("💡 **[조례 제51조의2 완화] 복합용도지구 (공업)**: 일반공업지역이나 준공업지역 수준으로 허용 용도가 확대됩니다.")
+        elif "계획관리지역" in zoning:
+            restrictions.append("💡 **[조례 제51조의2 완화] 복합용도지구 (계획관리)**: 일반/휴게음식점, 제과점, 판매시설, 숙박시설, 유원시설업이 일부 허용될 수 있습니다.")
+
+    return restrictions
+
+
 def is_invalid_val(val):
     """0.0, NaN, None, 빈 문자열 등 무효 데이터를 필터링합니다."""
     if pd.isna(val):
@@ -344,16 +422,15 @@ def map_zoning(val_str):
 
 def search_local_csv_and_db(address_str):
     """
-    폴더에 포함된 모든 양산시 CSV(표제부 및 지역지구구역) 및 SQLite DB에서 유효한 주용도, 기타용도, 용도지역, 지구단위계획(1종/2종), 
-    건폐율, 용적률 및 필지에 지정된 모든 지역지구 텍스트 정보를 검색합니다.
+    폴더에 포함된 모든 양산시 CSV(표제부 및 지역지구구역) 및 SQLite DB에서 유효한 주용도, 기타용도, 용도지역, 지구단위계획(1종/2종), 건폐율 및 용적률을 검색합니다.
     """
     found_purp = None
     found_etc_purp = None
     found_zoning = None
     found_district_plan = None
-    found_bcv = None  # 대장상 건폐율
-    found_far = None  # 대장상 용적률
-    all_districts_text = "" # 복합 규제 분석을 위한 전체 지정 구역 텍스트
+    found_bcv = None  # 건폐율
+    found_far = None  # 용적률
+    all_districts_text = ""
 
     if not address_str:
         return None, None, None, None, None, None, ""
@@ -405,7 +482,6 @@ def search_local_csv_and_db(address_str):
         if not matched_rows.empty:
             matched_rows = matched_rows.drop_duplicates()
 
-            # 전체 구역 텍스트 수집 (조례 완화/강화 분석용)
             all_text_arr = [str(x) for x in matched_rows.values.flatten() if pd.notna(x)]
             all_districts_text = " ".join(all_text_arr)
 
@@ -550,133 +626,6 @@ zoning_restrictions = {
     "계획관리지역": {"prohibited": ["위락시설", "무도장", "카지노"]}
 }
 
-# 양산시 도시계획 조례 및 건축 조례 기반 용도지역별 세부 업종 교차 진단 데이터베이스
-yangsan_ordinance_rules = {
-    "제1종전용주거지역": {
-        "additional_prohibited": ["음식점", "카페", "제과점", "골프연습장", "안마시술소", "학원", "PC방", "노래연습장", "사무소", "식육판매업", "미용업", "세탁소", "동물위탁관리업", "동물미용업", "공인중개사", "병원", "의원"],
-        "legal_basis": "양산시 도시계획 조례 제21조 및 [별표 2]에 따라 제1종전용주거지역 내에서는 단독주택 및 양호한 주거환경에 지장을 주지 않는 일부 부수시설 외의 일반 영업·상업·근린생활시설 설치가 엄격히 금지됩니다."
-    },
-    "제2종전용주거지역": {
-        "additional_prohibited": ["음식점", "카페", "제과점", "골프연습장", "안마시술소", "단란주점", "유흥주점", "PC방", "노래연습장", "동물위탁관리업"],
-        "legal_basis": "양산시 도시계획 조례 제22조 및 [별표 3]에 따라 공동주택 중심의 양호한 주거환경 보호를 위해 소음, 악취, 유해물질 또는 방문객 밀집을 유발하는 상업 업종의 입점이 제한됩니다."
-    },
-    "제1종일반주거지역": {
-        "additional_prohibited": ["단란주점", "유흥주점", "안마시술소", "골프연습장", "공장", "제조업", "세차장", "창고시설", "고물상", "식육포장처리업", "식품제조"],
-        "legal_basis": "양산시 도시계획 조례 제23조 및 [별표 4] 기준에 의거, 주거 밀집 지역 내 소음·악취·빛공해·환경오염 유발 시설은 입점이 제한됩니다."
-    },
-    "제2종일반주거지역": {
-        "additional_prohibited": ["단란주점", "유흥주점", "안마시술소", "공장", "제조업", "고물상"],
-        "legal_basis": "양산시 도시계획 조례 제24조 및 [별표 5]에 따라 중층 주택가 및 아파트 단지 인근의 정주 환경을 해치는 공장 및 위락·유흥 업종의 입점이 차단됩니다."
-    },
-    "제3종일반주거지역": {
-        "additional_prohibited": ["유흥주점", "위락시설", "안마시술소", "공장", "제조업"],
-        "legal_basis": "양산시 도시계획 조례 제25조 및 [별표 6]상 고층 공동주택 밀집 지역으로 대규모 인파 유입이나 주거 안정성을 저해하는 위락·숙박·공장 업종이 제한됩니다."
-    },
-    "준주거지역": {
-        "additional_prohibited": ["숙박시설", "위락시설", "공장(위해물실)"],
-        "legal_basis": "양산시 도시계획 조례 제26조 및 [별표 7]상 주거와 상업이 혼재하는 지역이나, 학교 및 공동주택 부지 경계와의 직선거리에 따라 숙박·위락 및 소음 유발 업종 허가가 제한됩니다."
-    },
-    "중심상업지역": {
-        "additional_prohibited": [],
-        "legal_basis": "양산시 도시계획 조례 제27조 및 [별표 8]상 상업·업무 기능의 중심 지역으로 대부분의 업종이 허용되나, 주차장법 및 다중이용업소 소방 방재 기준을 충족해야 합니다."
-    },
-    "일반상업지역": {
-        "additional_prohibited": [],
-        "legal_basis": "양산시 도시계획 조례 제28조 및 [별표 9]상 일반 상업 및 업무 활동 지역으로 판매, 서비스, 위락 등 대부분의 업종이 허용됩니다."
-    },
-    "근린상업지역": {
-        "additional_prohibited": ["유흥주점", "대형단란주점", "무도장", "카지노"],
-        "legal_basis": "양산시 도시계획 조례 제29조 및 [별표 10]에 따라 주거지역과 인접한 근린상업지역은 야간 소음 및 주거 환경 침해 우려가 있는 대형 유흥·위락 업종의 영업 허가가 제한될 수 있습니다."
-    },
-    "전용공업지역": {
-        "additional_prohibited": ["일반음식점", "휴게음식점", "소매점", "숙박시설", "주거시설", "판매시설", "의료시설", "교육연구시설", "학원", "오피스"],
-        "legal_basis": "양산시 도시계획 조례 제30조 및 [별표 11]상 순수 공업 전용 구역이므로 주거 및 일반 대중 대상 상업 서비스 시설의 입주가 엄격히 차단됩니다."
-    },
-    "일반공업지역": {
-        "additional_prohibited": ["숙박시설", "위락시설", "대규모 판매시설", "주거시설"],
-        "legal_basis": "양산시 도시계획 조례 제31조 및 [별표 12]에 따라 공장, 지식산업센터 및 공장 지원 시설 외의 일반 대중 이용 상업시설은 허용 구역이 엄격히 제한됩니다."
-    },
-    "준공업지역": {
-        "additional_prohibited": ["위락시설(대형)", "무도장(일부제한)"],
-        "legal_basis": "양산시 도시계획 조례 제32조 및 [별표 13]에 따라 아파트형 공장 및 지원상가 비율에 따른 업종 제한 규정이 적용됩니다."
-    },
-    "보전녹지지역": {
-        "additional_prohibited": ["일반음식점", "휴게음식점", "카페", "숙박시설", "공장", "제조업", "창고시설", "근린생활시설", "판매시설", "운동시설", "교육연구시설", "위락시설", "동물위탁관리업"],
-        "legal_basis": "양산시 도시계획 조례 제33조 및 [별표 14]에 따라 보전녹지지역은 자연환경 및 녹지 보호를 위해 원칙적으로 건축 및 영리 목적의 영업 행위가 극도로 제한됩니다."
-    },
-    "자연녹지지역": {
-        "additional_prohibited": ["숙박시설", "공장(일부제한)", "위락시설", "창고시설(대규모)", "폐기물처리시설"],
-        "legal_basis": "양산시 도시계획 조례 제34조 및 [별표 15]에 따라 건폐율 20%, 용적률 80% 이하가 적용되며, 성장관리방안 수립 여부 및 도로 접도 조건에 따라 허용 업종 심사가 엄격합니다."
-    },
-    "계획관리지역": {
-        "additional_prohibited": ["숙박시설", "위락시설", "공장(배출시설 기준 초과)"],
-        "legal_basis": "양산시 도시계획 조례 제35조 및 [별표 18]에 따라 공장 및 제조업소 입주 시 폐수·대기 배출시설 설치 승인 대상인 경우 지정된 업종만 허용될 수 있습니다."
-    }
-}
-
-yangsan_building_ordinance_rules = {
-    "제1종전용주거지역": {
-        "max_height_rule": "양산시 건축 조례 제25조에 따라 인접 대지경계선 및 도로와의 관계에 따른 높이 제한이 매우 엄격하며, 정북방향 일조권 확보 높이 제한(건축법 제61조)이 우선 적용됩니다.",
-        "parking_rule": "양산시 주차장 설치 조례 제12조: 시설물 면적당 주차대수 산정 시 강화된 지자체 기준이 적용됩니다."
-    },
-    "제2종전용주거지역": {
-        "max_height_rule": "양산시 건축 조례 제25조에 따른 높이 제한 및 정북 방향 일조권 기준이 엄격하게 적용됩니다.",
-        "parking_rule": "가구당 또는 면적당 법정 주차 대수 준수 필수 (양산시 주차장 조례 제12조)."
-    },
-    "제1종일반주거지역": {
-        "max_height_rule": "건축물 높이는 인접 대지경계선으로부터 정북 방향 및 채광을 위한 일조 확보 높이 제한(건축법 제61조)을 받습니다.",
-        "parking_rule": "다세대주택 및 근린생활시설 복합 건축 시 양산시 주차장 조례에 따른 세대당 주차 대수 확인 필수."
-    },
-    "제2종일반주거지역": {
-        "max_height_rule": "공동주택 및 인접 대지와의 일조권 확보를 위한 높이 제한 및 층수 규정이 엄격히 적용됩니다.",
-        "parking_rule": "상가 및 주택 복합 건축물 주차요건 강화 적용."
-    },
-    "제3종일반주거지역": {
-        "max_height_rule": "고층 건축물 허가 시 가로구역별 최고 높이 지정 여부(건축법 제60조) 및 대지 안의 공지 규정을 확인해야 합니다.",
-        "parking_rule": "대단지 주변 상가 및 오피스텔의 경우 주차장 설치 기준이 강화됩니다."
-    },
-    "준주거지역": {
-        "max_height_rule": "상업 업무 시설과 주거가 혼재되어 있으므로 인근 주거지역 일조권 영향에 따른 높이 완화 또는 제한 규정을 검토해야 합니다.",
-        "parking_rule": "상업시설 및 부설주차장 설치 기준 엄수."
-    },
-    "중심상업지역": {
-        "max_height_rule": "가로구역별 건축물 최고 높이 지정 구역(건축법 제60조) 내에 해당하는지 확인이 필요합니다.",
-        "parking_rule": "부설주차장 설치 면제 또는 완화 규정이 적용될 수 있으나 다중이용업소의 경우 자체 주차 확보가 필수입니다."
-    },
-    "일반상업지역": {
-        "max_height_rule": "미관지구 또는 경관지구 내 건축물의 경우 높이 및 형태 제한을 받습니다.",
-        "parking_rule": "상업용 시설 규모에 따른 법정 주차 대수 산정 확인."
-    },
-    "근린상업지역": {
-        "max_height_rule": "주거지역과 인접한 경우 일조권 및 높이 제한 규정이 일부 연계 적용될 수 있습니다.",
-        "parking_rule": "근린생활시설 및 유흥·위락시설 복합 시 주차요건 강화."
-    },
-    "전용공업지역": {
-        "max_height_rule": "공장 건축물의 처마높이 및 층수 제한, 구조안전 확인 대상 건축물 기준 적용.",
-        "parking_rule": "공장 면적 및 상시 고용 인원 기준 부설주차장 확보."
-    },
-    "일반공업지역": {
-        "max_height_rule": "대형 공장 및 지식산업센터 건축 시 최고 높이 및 소방도로 확보 기준 적용.",
-        "parking_rule": "화물차 주차공간 및 일반 승용차 주차구획 동시 확보."
-    },
-    "준공업지역": {
-        "max_height_rule": "아파트형 공장 및 복합 지원시설의 높이 및 대지 안의 공지 기준 적용.",
-        "parking_rule": "지원시설 비율에 따른 주차장 산정 기준 준수."
-    },
-    "보전녹지지역": {
-        "max_height_rule": "건축물의 높이는 원칙적으로 3층 이하 또는 높이 11미터 이하로 제한되는 경우가 많습니다.",
-        "parking_rule": "녹지지역 내 예외적 건축물 허용 시 법정 주차기준 적용."
-    },
-    "자연녹지지역": {
-        "max_height_rule": "건폐율 20%, 용적률 80% 이하 및 층수 제한(일반적으로 4층 이하)이 적용됩니다.",
-        "parking_rule": "건축 조례에 따른 부설주차장 설치 기준 적용."
-    },
-    "계획관리지역": {
-        "max_height_rule": "성장관리방안 수립 구역 여부에 따라 층수 및 높이 인센티브 또는 제한이 다르게 적용됩니다.",
-        "parking_rule": "계획관리지역 내 공장·창고·근린생활시설 부설주차장 기준 준수."
-    }
-}
-
 st.markdown("---")
 
 # 3. 대상 부동산 기본 팩트 입력
@@ -706,6 +655,8 @@ if 'far_info' not in st.session_state:
     st.session_state["far_info"] = "정보없음"
 if 'zoning_reason_info' not in st.session_state:
     st.session_state["zoning_reason_info"] = ""
+if 'zoning_restrictions_info' not in st.session_state:
+    st.session_state["zoning_restrictions_info"] = []
 
 # -----------------------------------------------------------------------------
 # 🎯 [양산시 로컬 CSV + 카카오 맵 정제 기반 통합 정밀 연동 로직]
@@ -747,6 +698,11 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                         else:
                             st.info("💡 연동 데이터에 용도지역 정보가 없거나 미등록 필지입니다. 용도지역 목록에서 선택해 주세요.")
 
+                    # 조례상 건축제한 동적 산출 (조례 제31조~제51조 분석)
+                    current_sel_zoning = st.session_state.get("main_zoning_select")
+                    restriction_list = get_building_restriction_info(current_sel_zoning, all_districts_text)
+                    st.session_state["zoning_restrictions_info"] = restriction_list
+
                     # 주용도 또는 기타용도를 기준으로 스마트 매칭 (나대지 예외 처리 포함)
                     matched_bld = None
                     if real_main_purp and not is_invalid_val(real_main_purp):
@@ -779,7 +735,6 @@ if st.button("🔍 지번 정제 및 실제 용도지역/건축물대장 조회 
                         st.session_state["etc_purp_info"] = "해당없음 / 미등록"
 
                     # Step 4: 건폐율 / 용적률 조례 심층 분석 (완화/특례 자동 적용)
-                    current_sel_zoning = st.session_state.get("main_zoning_select")
                     target_b = st.session_state.get("main_target_biz_select", "")
                     
                     zoning_limit_text = ""
@@ -848,6 +803,13 @@ if bld_use == "나대지(건축물없음)" and zoning in yangsan_zoning_limits_b
     current_far = f"나대지 (조례 한도: {yangsan_zoning_limits_base[zoning]['far']}%)"
 
 st.info(f"📋 **[현재 설정 상태]:** 용도지역(`{zoning}`) | 주용도(`{bld_use}`) | 기타용도(`{current_etc}`) | 건폐율(`{current_bcv}`) | 용적률(`{current_far}`) | 지구단위계획(`{current_dp}`)")
+
+# [양산시 도시계획 조례] 건축 제한 규정 자동 표시 영역
+restriction_logs = st.session_state.get("zoning_restrictions_info", [])
+if restriction_logs:
+    with st.expander("🏛️ **양산시 도시계획 조례 (제31조~제51조) 건축 제한 요약 보기**", expanded=True):
+        for log in restriction_logs:
+            st.markdown(log)
 
 col_f1, col_f2 = st.columns(2)
 with col_f1:
@@ -990,44 +952,6 @@ if submitted:
                     f"'{target_biz}'의 입점 및 영업이 법적으로 원천 금지되어 있습니다. "
                     f"💡 **해결 대안:** 해당 용도지역 내에서는 허용되지 않으므로, 상업지역 등 해당 업종이 허용되는 다른 입지로 물건을 변경해야 합니다."
                 )
-
-    # 2. 양산시 도시계획 조례 교차 진단
-    if property_type == "상가 / 일반 건축물" and zoning in yangsan_ordinance_rules:
-        yangsan_rule = yangsan_ordinance_rules[zoning]
-        
-        matched_ban = False
-        for add_p in yangsan_rule["additional_prohibited"]:
-            if add_p in target_biz or add_p in biz_category or any(kw in target_biz for kw in add_p.split()):
-                matched_ban = True
-                fatal_errors.append(
-                    f"[양산시 도시계획 조례 규제 위반 / 계약 절대금지] 국토계획법상 가능하더라도, **양산시 도시계획 조례**에 따라 "
-                    f"'{zoning}' 지역에서는 임차인께서 선택하신 **'{target_biz}'**의 입점 및 건축허가가 법적으로 엄격히 금지됩니다. "
-                    f"📜 **법적 근거:** {yangsan_rule['legal_basis']} "
-                    f"💡 **해결 대안:** 양산시 조례 기준 위반에 해당하므로 본 물건은 계약할 수 없으며, 양산시 조례상 해당 업종이 허용되는 타 용도지역 상가 물건을 검토하세요."
-                )
-                break
-        
-        if not matched_ban:
-            if zoning == "중심상업지역":
-                warnings.append(
-                    f"🏛️ **[양산시 도시계획 조례 크로스 체크 안내]** {yangsan_rule['legal_basis']} "
-                    f"(💡 중심상업지역이라 '{target_biz}' 업종 자체는 허용되나, 실제 현장 실무 시 **양산시 주차장 조례 대수 기준 및 소방방재 시설 기준** 미달로 인한 허가 반려 사고가 빈번하므로 건축물대장 및 소방 동선을 반드시 실측·확인하세요.)"
-                )
-            else:
-                legal_actions.append(
-                    f"🏛 **[양산시 도시계획 조례 교차 검증 통과]** '{zoning}' 지역 내에서 **'{target_biz}'** 입점은 양산시 도시계획 조례상 추가 제한 규정에 저촉되지 않으며 법적 근거가 확보됩니다. "
-                    f"(기준 근거: {yangsan_rule['legal_basis']})"
-                )
-
-    # 2-1. 양산시 건축 조례상 높이, 일조권 및 주차장 기준 검토
-    if property_type == "상가 / 일반 건축물" and zoning in yangsan_building_ordinance_rules:
-        bld_rule = yangsan_building_ordinance_rules[zoning]
-        legal_actions.append(
-            f"📐 **[양산시 건축 조례 동시교차 검증 - 높이 및 일조]** {bld_rule['max_height_rule']}"
-        )
-        legal_actions.append(
-            f"🚗 **[양산시 건축 조례 동시교차 검증 - 주차장 기준]** {bld_rule['parking_rule']}"
-        )
 
     # 3. 학교정화구역 검증 (교육환경 보호에 관한 법률 제9조)
     if has_school_zone:
