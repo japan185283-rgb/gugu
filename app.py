@@ -880,8 +880,14 @@ comprehensive_biz_dict = {
     "🍺 주점 및 유흥·위락": [
         "일반주점·맥주집", "유흥주점", "단란주점", "무도장 및 카지노업소"
     ],
-    "🥩 제조업 및 축산물·식품가공": [
+    "🥩 일반 제조업 및 축산물·식품가공": [
         "식육포장처리업", "식육가공업", "식품제조·가공업", "금속가공제품 제조업", "인쇄소 및 출판업"
+    ],
+    "🏭 공장 및 전문 제조업 (세부업종)": [
+        "기계장비 제조업", "자동차부품 제조업", "전자부품 제조업", "1차 금속 제조업",
+        "플라스틱제품 제조업", "고무제품 제조업", "화학물질 및 화학제품 제조업",
+        "섬유제품 제조업", "의복 및 모피제품 제조업", "가구 제조업",
+        "목재 및 나무제품 제조업", "종이 및 판지 제조업", "비금속 광물제품 제조업"
     ],
     "📦 창고, 물류 및 자원순환": [
         "일반 물류창고", "냉장·냉동창고", "택배 대리점 및 집화시설", "고물상 및 폐기물재활용시설"
@@ -1055,7 +1061,7 @@ if submitted:
             else:
                 legal_actions.append("🍻 **[일반주점 적합]** 식품위생법상 일반음식점 영업신고 대상. (다중이용업소 해당 여부 소방 점검 필수)")
 
-        elif "식육포장처리업" in target_biz or "식육가공업" in target_biz or "식품제조·가공업" in target_biz or "금속가공제품 제조업" in target_biz or "인쇄소 및 출판업" in target_biz:
+        elif "식육포장처리업" in target_biz or "식육가공업" in target_biz or "식품제조·가공업" in target_biz or "금속가공제품 제조업" in target_biz or "인쇄소 및 출판업" in target_biz or "기계장비 제조업" in target_biz or "자동차부품 제조업" in target_biz or "전자부품 제조업" in target_biz or "1차 금속 제조업" in target_biz or "플라스틱제품 제조업" in target_biz or "고무제품 제조업" in target_biz or "화학물질 및 화학제품 제조업" in target_biz or "섬유제품 제조업" in target_biz or "의복 및 모피제품 제조업" in target_biz or "가구 제조업" in target_biz or "목재 및 나무제품 제조업" in target_biz or "종이 및 판지 제조업" in target_biz or "비금속 광물제품 제조업" in target_biz:
             if bld_use != "공장":
                 if bld_use in ["제2종근린생활시설", "제1종근린생활시설"] and area < 500.0:
                     warnings.append(
