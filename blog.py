@@ -8,7 +8,7 @@ st.title("✍️ 베테랑 공인중개사 AI 블로그 자동 생성기")
 st.markdown("네이버 SEO 로직에 최적화된, 법적 전문성이 돋보이는 신뢰감 있는 블로그 원고를 1분 만에 작성합니다.")
 st.markdown("---")
 
-# 2. 사이드바: API 키 입력란
+# 2. 사이드바: API 키 입력란 (수동 입력으로 복구)
 with st.sidebar:
     st.header("🔑 AI 설정")
     st.markdown("구글 AI 스튜디오에서 발급받은 Gemini API 키를 입력하세요.")
@@ -30,33 +30,25 @@ with col2:
 st.markdown("##### 📐 면적 및 상세 조건")
 area_info = ""
 
-# 매물 종류에 따라 면적 입력칸이 다르게 나타나는 마법!
+# 매물 종류에 따라 면적 입력칸만 깔끔하게 나옵니다. (추천 타겟은 AI가 알아서 판단!)
 if property_type in ["상가", "아파트", "오피스텔"]:
-    col3, col4 = st.columns(2)
-    with col3:
-        area_val = st.text_input("전용/공급면적", placeholder="예: 전용 100㎡ (약 30평)")
-    with col4:
-        target_customer = st.text_input("추천 타겟 고객", placeholder="예: 카페 창업, 신혼부부 등")
+    area_val = st.text_input("전용/공급면적", placeholder="예: 전용 100㎡ (약 30평)")
     area_info = f"- 면적: {area_val}"
     
 elif property_type in ["단독주택", "공장/창고"]:
-    col3, col4, col5 = st.columns(3)
+    col3, col4 = st.columns(2)
     with col3:
         land_area = st.text_input("대지면적", placeholder="예: 330㎡ (약 100평)")
     with col4:
         bld_area = st.text_input("건축/연면적", placeholder="예: 150㎡ (약 45평)")
-    with col5:
-        target_customer = st.text_input("추천 타겟 고객", placeholder="예: 물류창고, 전원생활 등")
     area_info = f"- 대지면적: {land_area}\n- 건축/연면적: {bld_area}"
 
 elif property_type == "토지":
-    col3, col4, col5 = st.columns(3)
+    col3, col4 = st.columns(2)
     with col3:
         land_area = st.text_input("토지 면적", placeholder="예: 1000㎡ (약 300평)")
     with col4:
         zoning = st.text_input("용도지역 (건폐율/용적률)", placeholder="예: 제1종일반 (60%/200%)")
-    with col5:
-        target_customer = st.text_input("추천 타겟/활용도", placeholder="예: 상가주택 신축, 창고부지 등")
     area_info = f"- 토지 면적: {land_area}\n- 용도지역 및 건폐율/용적률: {zoning}"
 
 features = st.text_area("✨ 매물 핵심 특장점 (키워드 위주로 편하게 작성)", 
@@ -66,7 +58,7 @@ features = st.text_area("✨ 매물 핵심 특장점 (키워드 위주로 편하
 land_special_prompt = ""
 if property_type == "토지":
     land_special_prompt = """
-    7. 토지 신축 시뮬레이션 (토지 매물 특화) - ★매우 중요★:
+    8. 토지 신축 시뮬레이션 (토지 매물 특화) - ★매우 중요★:
        - 입력된 '토지 면적'과 '용도지역 (건폐율/용적률)' 정보를 계산하여, "이 땅을 매수할 경우 1층 바닥면적을 대략 몇 평까지 앉힐 수 있고, 전체 몇 층짜리 건물을 몇 평 규모로 올릴 수 있는지" 매수자 입장에서 상상하기 쉽게 설명하는 브리핑 문단을 추가해주세요.
     """
 
@@ -79,11 +71,11 @@ if st.button("🚀 전문성 넘치는 블로그 포스팅 생성하기", type="
     else:
         with st.spinner("AI가 양산시 베테랑 공인중개사의 마인드로 원고를 작성 중입니다... (약 10~15초 소요)"):
             try:
-                # API 키 설정
+                # API 키 설정 (수동 입력받은 키 사용)
                 genai.configure(api_key=api_key)
                 
-                # 가장 빠르고 안정적인 모델(gemini-1.5-flash)로 고정 세팅
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                # 구글 최신 모델로 수정 완료 (404 오류 해결)
+                model = genai.GenerativeModel('gemini-3.8-flash')
                 
                 # 프롬프트(명령어) 세팅
                 prompt = f"""
@@ -99,7 +91,6 @@ if st.button("🚀 전문성 넘치는 블로그 포스팅 생성하기", type="
                 - 소재지: {location}
                 - 가격: {price}
                 {area_info}
-                - 추천 타겟: {target_customer}
                 - 핵심 특징: {features}
 
                 [블로그 작성 가이드라인 및 SEO 최적화 규칙]
@@ -107,19 +98,22 @@ if st.button("🚀 전문성 넘치는 블로그 포스팅 생성하기", type="
                    - 검색 유입이 잘 되도록 지역명({location})과 매물 짧은 특징을 반드시 포함하여 호기심을 유발하는 클릭하고 싶은 제목 3가지를 먼저 제안해주세요.
                 
                 2. 본문 도입부:
-                   - 방문자의 이탈률을 줄이도록 날씨, 지역 호재, 혹은 상가/토지 구하는 분들의 최근 고충에 공감하며 글을 시작하세요.
+                   - 방문자의 이탈률을 줄이도록 지역 호재나 매물 수요자들의 최근 고충에 공감하며 글을 시작하세요.
                 
                 3. 전문가의 시선 (법적/안전성 강조) - ★가장 중요★:
-                   - 본문 내용 중에 반드시 "단순히 눈에 보이는 것만 브리핑하지 않습니다. 건축물대장상 용도와 양산시 도시계획 조례에 따른 건폐율/용적률, 그리고 인허가 제약 여부까지 철저하게 권리 분석을 마친 안전한 매물입니다." 와 같은 뉘앙스의 문단을 넣어, 초보 중개사와는 차원이 다른 베테랑의 법적 지식을 과시하세요.
+                   - "단순히 눈에 보이는 것만 브리핑하지 않습니다. 건축물대장상 용도와 양산시 도시계획 조례에 따른 건폐율/용적률, 인허가 제약 여부까지 권리 분석을 마친 안전한 매물입니다." 와 같은 뉘앙스의 문단을 넣어 베테랑의 지식을 과시하세요.
                    
                 4. 매물 특징 설명:
                    - 입력된 특징({features})을 자연스럽게 풀어쓰되, 장점을 극대화하세요.
                 
-                5. 가독성 (모바일 최적화):
+                5. 🎯 최적의 활용도 및 타겟 고객 제안 (AI 자동 분석) - ★핵심 미션★:
+                   - 매물의 종류({property_type}), 소재지({location}), 면적, 특징 등을 종합적으로 분석하여 이 매물에 가장 잘 어울리는 업종(예: 대형 베이커리 카페, 마라탕 전문점, 물류 창고 등)이나 최적의 매수자 타겟층을 당신(AI)이 스스로 판단해서 추천해 주세요. 중개사로서 "이 자리는 OO이 들어오면 딱입니다!"라고 자신 있게 제안하는 뉘앙스여야 합니다.
+
+                6. 가독성 (모바일 최적화):
                    - 스마트폰으로 읽기 편하게 3~4줄마다 반드시 엔터를 치고, 적절한 소제목(##)과 이모지(📍, 💡, 🏢, ✅ 등)를 활용하세요.
                 
-                6. 클로징 (Call to Action):
-                   - 희소성 있는 매물이니 빠른 현장 안내를 원하면 연락 달라는 친절하고 신뢰감 있는 멘트로 마무리하세요.
+                7. 클로징 (Call to Action):
+                   - 희소성 있는 매물이니 빠른 현장 안내를 원하면 연락 달라는 멘트로 마무리하세요.
                    
                 {land_special_prompt}
 
