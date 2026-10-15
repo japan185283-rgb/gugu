@@ -11,7 +11,7 @@ import streamlit as st
 # 🔑 [필수 설정] 발급받으신 토큰과 API 키를 입력하세요.
 # ==============================================================================
 TELEGRAM_BOT_TOKEN = "8888093721:AAEtJjp2ol1FLDNWQP-VpebbbcD1TG04s_8" # 대표님 토큰 세팅 완료
-GEMINI_API_KEY = "여기에_구글_GEMINI_API_KEY_입력"
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 
 # 봇 및 AI 초기화
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
