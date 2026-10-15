@@ -8,14 +8,10 @@ import time
 import streamlit as st
 
 # ==============================================================================
-# 🔑 [필수 설정] 발급받으신 토큰과 API 키를 입력하세요.
-# ==============================================================================
-# 대표님이 직접 가져오신 100% 정확한 텔레그램 토큰으로 교체 완료!
 TELEGRAM_BOT_TOKEN = "8888093721:AAEtJjp2ollFLDNWQP-VpebbbcDlTGO4s_8" 
-
-# 👇 아래 따옴표 안에 대표님의 진짜 구글 제미나이 API 키를 꼭 다시 넣어주세요! 👇
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"].strip()
-# 봇 및 AI 초기화
+# ==============================================================================
+
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 genai.configure(api_key=GEMINI_API_KEY)
 ai_model = genai.GenerativeModel('gemini-3.8-flash')
@@ -29,6 +25,20 @@ CORTAR_MAP = {"물금읍": "4833025000", "동면": "4833031000", "원동면": "4
 
 ADMIN_CHAT_ID = None
 SEEN_ARTICLES = set()
+
+def parse_naver_price(price_str):
+    """네이버의 '10억 5,000' 같은 글자를 숫자(만원)로 바꿔주는 마법의 번역기"""
+    if not price_str or str(price_str).strip() == "": return 0
+    p_str = str(price_str).replace(",", "").replace(" ", "")
+    try:
+        if "억" in p_str:
+            parts = p_str.split("억")
+            uk = int(parts[0]) * 10000 if parts[0].isdigit() else 0
+            man = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+            return uk + man
+        return int(p_str) if p_str.isdigit() else 0
+    except:
+        return 0
 
 def parse_query_with_gemini(user_text: str) -> dict:
     prompt = f"""
@@ -61,17 +71,22 @@ def fetch_naver_articles(filter_data: dict) -> list:
         if res.status_code != 200: return []
         matched = []
         for atcl in res.json().get("body", []):
-            deal = atcl.get("dealPrc", 0)
-            rent = atcl.get("rentPrc", 0)
+            # 글자로 된 네이버 가격을 숫자로 똑똑하게 번역해서 비교!
+            deal = parse_naver_price(atcl.get("dealPrc", "0"))
+            rent = parse_naver_price(atcl.get("rentPrc", "0"))
+            
             if filter_data["max_price"] > 0 and deal > filter_data["max_price"]: continue
             if filter_data["max_rent"] > 0 and rent > filter_data["max_rent"]: continue
+            
             area_py = float(atcl.get("spc2", atcl.get("spc1", 0))) * 0.3025
             if filter_data["min_area_py"] > 0 and area_py < filter_data["min_area_py"]: continue
             if filter_data["max_area_py"] > 0 and area_py > filter_data["max_area_py"]: continue
+            
             matched.append(atcl)
             if len(matched) >= 5: break
         return matched
-    except:
+    except Exception as e:
+        print(f"네이버 조회 에러: {e}")
         return []
 
 def monitor_new_listings():
@@ -93,7 +108,7 @@ def monitor_new_listings():
                             name = atcl.get("atclNm", "매물명")
                             trade_name = atcl.get("tradTpNm", "")
                             prc = atcl.get("prc", "")
-                            rent = f" / {atcl.get('rentPrc')}만원" if atcl.get("rentPrc", 0) > 0 else ""
+                            rent = f" / {atcl.get('rentPrc')}만원" if str(atcl.get("rentPrc", "0")) != "0" else ""
                             spc = atcl.get("spc2", "")
                             link = f"https://m.land.naver.com/article/info/{atcl.get('atclNo')}"
                             bot.send_message(ADMIN_CHAT_ID, f"🚨 **[양산시 신규 매물]**\n\n🏢 **{name} ({trade_name})**\n💰 **가격:** {prc}{rent}\n📐 **면적:** 전용 {spc}㎡\n👉 [네이버 확인]({link})", parse_mode="Markdown", disable_web_page_preview=True)
@@ -115,19 +130,19 @@ def handle_user_query(message):
     matched_articles = fetch_naver_articles(filter_data)
 
     if not matched_articles:
-        bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text="⚠️ 조건에 부합하는 실시간 매물을 찾지 못했습니다.")
+        bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text="⚠️ 조건에 부합하는 실시간 매물을 찾지 못했습니다.\n\n(조건이 너무 까다롭거나 현재 네이버에 해당 매물이 없습니다.)")
         return
 
     result_lines = [f"🏢 **[{filter_data.get('dong')} 실시간 검색 결과]**\n"]
     for i, atcl in enumerate(matched_articles, start=1):
         prc = atcl.get("prc", "")
-        rent_prc = f" / {atcl.get('rentPrc')}만원" if atcl.get("rentPrc", 0) > 0 else ""
+        rent_prc = f" / {atcl.get('rentPrc')}만원" if str(atcl.get("rentPrc", "0")) != "0" else ""
         link = f"https://m.land.naver.com/article/info/{atcl.get('atclNo')}"
         result_lines.append(f"**{i}. {atcl.get('atclNm')} ({atcl.get('tradTpNm')})**\n• **가격:** {prc}{rent_prc}\n👉 [상세 보기]({link})\n")
     bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text="\n".join(result_lines), parse_mode="Markdown", disable_web_page_preview=True)
 
 # ==============================================================================
-# 🌐 스트림릿 웹 서버 화면 (이 창이 클라우드에 켜져 있어야 봇이 24시간 돌아갑니다)
+# 🌐 스트림릿 웹 서버 화면
 # ==============================================================================
 st.set_page_config(page_title="AI 비서 서버", page_icon="🤖")
 st.title("🤖 양산시 AI 부동산 비서 서버 가동 중")
