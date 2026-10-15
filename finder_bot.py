@@ -10,8 +10,11 @@ import streamlit as st
 # ==============================================================================
 # 🔑 [필수 설정] 발급받으신 토큰과 API 키를 입력하세요.
 # ==============================================================================
-TELEGRAM_BOT_TOKEN = "8888093721:AAEtJjp2ol1FLDNWQP-VpebbbcD1TG04s_8" # 대표님 토큰 세팅 완료
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+# 대표님이 직접 가져오신 100% 정확한 텔레그램 토큰으로 교체 완료!
+TELEGRAM_BOT_TOKEN = "8888093721:AAEtJjp2ollFLDNWQP-VpebbbcDlTGO4s_8" 
+
+# 👇 아래 따옴표 안에 대표님의 진짜 구글 제미나이 API 키를 꼭 다시 넣어주세요! 👇
+GEMINI_API_KEY = "여기에_구글_GEMINI_API_KEY_입력"
 
 # 봇 및 AI 초기화
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
@@ -98,7 +101,7 @@ def monitor_new_listings():
                     is_first_run = False
             except Exception as e:
                 pass
-        time.sleep(600) # 10분마다 실행
+        time.sleep(600)
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
