@@ -14,8 +14,7 @@ import streamlit as st
 TELEGRAM_BOT_TOKEN = "8888093721:AAEtJjp2ollFLDNWQP-VpebbbcDlTGO4s_8" 
 
 # 👇 아래 따옴표 안에 대표님의 진짜 구글 제미나이 API 키를 꼭 다시 넣어주세요! 👇
-GEMINI_API_KEY = "여기에_구글_GEMINI_API_KEY_입력"
-
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"].strip()
 # 봇 및 AI 초기화
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 genai.configure(api_key=GEMINI_API_KEY)
