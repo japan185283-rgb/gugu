@@ -8,7 +8,7 @@ import time
 import streamlit as st
 
 # ==============================================================================
-TELEGRAM_BOT_TOKEN = ""8918254788:AAG1hF7jzStlR9BdlZ-eQQBdNtoLIPpsG90"" 
+TELEGRAM_BOT_TOKEN = "8918254788:AAG1hF7jzStlR9BdlZ-eQQBdNtoLIPpsG90"
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"].strip()
 # ==============================================================================
 
