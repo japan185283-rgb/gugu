@@ -75,7 +75,7 @@ if st.button("🚀 전문성 넘치는 블로그 포스팅 생성하기", type="
                 genai.configure(api_key=api_key)
                 
                 # 🌟 일일 1,500회 무료로 넉넉하게 쓸 수 있는 1.5 플래시 모델로 변경!
-                model = genai.GenerativeModel('gemini-1.5-flash-latest')
+                model = genai.GenerativeModel('gemini-pro')
                 
                 # 프롬프트(명령어) 세팅
                 prompt = f"""
