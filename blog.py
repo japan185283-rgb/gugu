@@ -8,7 +8,7 @@ st.title("✍️ 베테랑 공인중개사 AI 블로그 자동 생성기")
 st.markdown("네이버 SEO 로직에 최적화된, 법적 전문성이 돋보이는 신뢰감 있는 블로그 원고를 1분 만에 작성합니다.")
 st.markdown("---")
 
-# 2. 사이드바: API 키 입력란 (수동 입력으로 복구)
+# 2. 사이드바: API 키 입력란 (수동 입력 유지)
 with st.sidebar:
     st.header("🔑 AI 설정")
     st.markdown("구글 AI 스튜디오에서 발급받은 Gemini API 키를 입력하세요.")
@@ -30,7 +30,7 @@ with col2:
 st.markdown("##### 📐 면적 및 상세 조건")
 area_info = ""
 
-# 매물 종류에 따라 면적 입력칸만 깔끔하게 나옵니다. (추천 타겟은 AI가 알아서 판단!)
+# 매물 종류에 따라 면적 입력칸이 다르게 나타납니다.
 if property_type in ["상가", "아파트", "오피스텔"]:
     area_val = st.text_input("전용/공급면적", placeholder="예: 전용 100㎡ (약 30평)")
     area_info = f"- 면적: {area_val}"
@@ -54,7 +54,7 @@ elif property_type == "토지":
 features = st.text_area("✨ 매물 핵심 특장점 (키워드 위주로 편하게 작성)", 
                         placeholder="예: 물금역 도보 5분, 전면 통유리, 주차 5대 넉넉함, 권리금 없음, 최근 내부 올수리 완료, 유동인구 많음")
 
-# 토지일 경우 AI에게 신축 시뮬레이션을 작성하라는 특별 명령 추가
+# 토지일 경우 AI에게 신축 시뮬레이션을 작성하라는 특별 명령
 land_special_prompt = ""
 if property_type == "토지":
     land_special_prompt = """
@@ -74,8 +74,8 @@ if st.button("🚀 전문성 넘치는 블로그 포스팅 생성하기", type="
                 # API 키 설정 (수동 입력받은 키 사용)
                 genai.configure(api_key=api_key)
                 
-                # 구글 최신 모델로 수정 완료 (404 오류 해결)
-                model = genai.GenerativeModel('gemini-3.8-flash')
+                # 🌟 일일 1,500회 무료로 넉넉하게 쓸 수 있는 1.5 플래시 모델로 변경!
+                model = genai.GenerativeModel('gemini-1.5-flash')
                 
                 # 프롬프트(명령어) 세팅
                 prompt = f"""
