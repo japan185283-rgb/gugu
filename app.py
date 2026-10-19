@@ -65,6 +65,13 @@ def load_all_local_csvs():
 
 df_parcels, loaded_csv_files = load_all_local_csvs()
 
+# 상단 연동 안내 문구 간소화
+if loaded_csv_files:
+    st.success(f"✅ **[양산시 로컬 CSV 데이터 자동 연동 완료]** 총 {len(loaded_csv_files)}개 CSV 파일 (건축물 표제부 및 지역지구구역) 연동 완료")
+else:
+    st.info("💡 폴더 내에 CSV 파일이 없습니다. 양산시 지번/건축물/지역지구구역/산단 CSV 파일을 폴더에 위치시켜 주세요.")
+
+
 # -----------------------------------------------------------------------------
 # 🛠 [데이터 정제, 코드 매핑 및 자동 선택 보완 함수]
 # -----------------------------------------------------------------------------
@@ -624,6 +631,9 @@ zoning_restrictions = {
     "계획관리지역": {"prohibited": ["위락시설", "무도장", "카지노"]}
 }
 
+# ==============================================================================
+# 🏢 모드 1: 기존 공법 및 인허가 진단 (일반 매매/임대)
+# ==============================================================================
 if app_mode == "🏢 1. 공법 및 인허가 진단 (일반 매매/임대)":
     st.markdown("---")
 
@@ -1106,7 +1116,7 @@ if app_mode == "🏢 1. 공법 및 인허가 진단 (일반 매매/임대)":
                     legal_actions.append("🏥 **[의료시설 적합]** 의료법 및 소방법에 따른 노유자/의료시설 전용 피난계단, 휠체어 램프, 스프링클러 및 의료폐기물 처리 요건 충족 필수.")
 
             elif "치과의원" in target_biz or "한의원" in target_biz:
-                if bld_use not in ["제1종근린생활시설", "의료시설"]:
+                if bld_use not in ["제1종근린생활시설", "제2종근린생활시설", "의료시설"]:
                     warnings.append(
                         f"[의원급 합법화 대안 - 의료법 제33조] 의원(입원실 없음, 또는 소규모)은 주용도가 **'제1종근린생활시설'**(또는 의료시설)이어야 합니다. (현재: {bld_use})\n"
                         f"💡 **[합법화 대안]** 관할 관청에 **건축물 표시변경**을 신청하여 주용도를 '제1종근린생활시설(의원)'로 변경하면 보건소 개설 신고 및 영업이 가능합니다."
@@ -1493,7 +1503,7 @@ if app_mode == "🏢 1. 공법 및 인허가 진단 (일반 매매/임대)":
 # ==============================================================================
 elif app_mode == "⚖️ 2. 보증금 안전성 및 권리분석 (깡통전세/경매 진단)":
     st.title("⚖️ 보증금 안전성 및 깡통전세/경매 권리 진단")
-    st.markdown("주변 매매 시세와 건물에 잡혀 있는 총 빚(근저당+선순위 보증금)을 비교하여, **만약 건물이 경매로 넘어가 몇 번 유찰되더라도 내 보증금을 안전하게 지킬 수 있는지** 즉석에서 분석합니다.")
+    st.markdown("주임법(주택)과 상임법(상가)의 **법적 적용 기준(최우선변제권 및 대항력)**을 완벽히 구분하여, 주변 매매 시세와 총 부채를 바탕으로 내 보증금의 안전성을 심층 진단합니다.")
     st.markdown("---")
 
     col1, col2 = st.columns(2)
@@ -1505,17 +1515,92 @@ elif app_mode == "⚖️ 2. 보증금 안전성 및 권리분석 (깡통전세/�
         
     with col2:
         st.subheader("👤 2. 내 계약 정보 (또는 예상 입찰가)")
-        my_deposit = st.number_input("내 임차 보증금 (또는 예상 입찰가) (만원)", value=15000, step=1000)
+        lease_type = st.radio("적용 법률 선택 (물건 용도)", ["🏠 주택 (주임법 적용)", "🏢 상가 (상임법 적용)"])
         
-        st.info("💡 **실무 팁:**\n상가/원룸 통건물 계약 시, 등기부등본의 '채권최고액(선순위 근저당)'과 임대인이 고지한 '선순위 보증금 합계'를 반드시 합산하여 내 보증금의 안전을 판단해야 합니다.")
+        my_deposit = st.number_input("내 임차 보증금 (또는 예상 입찰가) (만원)", value=3000, step=1000)
+        my_monthly_rent = 0
+        
+        if lease_type == "🏢 상가 (상임법 적용)":
+            my_monthly_rent = st.number_input("월세 (만원) - 상임법 환산보증금 계산용", value=100, step=10)
+            
+        st.markdown("##### 🛡️ 대항력 및 권리 확보 상태")
+        if lease_type == "🏠 주택 (주임법 적용)":
+            has_move_in = st.checkbox("✅ 전입신고 및 점유 완료 (대항력 요건)", value=True)
+        else:
+            has_move_in = st.checkbox("✅ 사업자등록 및 점유 완료 (대항력 요건)", value=True)
+            
+        has_confirm_date = st.checkbox("✅ 확정일자 부여 완료 (우선변제권 요건)", value=True)
+        
+        if lease_type == "🏠 주택 (주임법 적용)":
+            region = st.selectbox(
+                "📍 물건지 지역 (소액임차인 최우선변제 산정 기준)", 
+                ["양산시 및 그 밖의 지역", "서울특별시", "과밀억제권역, 세종, 용인, 화성, 김포", "광역시, 안산, 광주(경기), 파주, 이천, 평택"]
+            )
+        else:
+            region = st.selectbox(
+                "📍 물건지 지역 (상임법 환산보증금 산정 기준)", 
+                ["양산시 및 그 밖의 지역", "서울특별시", "과밀억제권역 및 부산광역시", "광역시, 세종, 파주, 화성, 안산, 용인, 김포, 광주(경기)"]
+            )
+        
+        st.info("💡 **실무 팁:** 상가/원룸 통건물 계약 시, 등기부등본의 '채권최고액(선순위 근저당)'과 임대인이 고지한 '선순위 보증금 합계'를 반드시 합산하여 내 보증금의 안전을 판단해야 합니다.")
 
-    if st.button("🚀 보증금 안전성 및 경매 유찰 시뮬레이션 실행", type="primary"):
+    if st.button("🚀 권리분석 및 보증금 안전성 시뮬레이션 실행", type="primary"):
         st.markdown("---")
         
-        # 총 선순위 빚 계산
-        total_prior_debt = prior_mortgage + prior_deposits
+        st.subheader("🛡️ 임차인 보호 권리 (우선변제 및 최우선변제 법적 진단)")
         
-        st.subheader("💡 진단 결과 요약")
+        # 최우선변제권 한도 및 적용 여부 계산
+        is_priority = has_move_in and has_confirm_date
+        guaranteed_money = 0
+        small_limit = 0
+        small_protect = 0
+        
+        if lease_type == "🏠 주택 (주임법 적용)":
+            # 2023.2.21 시행 주임법 기준
+            if region == "서울특별시": small_limit, small_protect = 16500, 5500
+            elif "과밀억제" in region: small_limit, small_protect = 14500, 4800
+            elif "광역시" in region: small_limit, small_protect = 8500, 2800
+            else: small_limit, small_protect = 7500, 2500 # 양산시 등
+            
+            is_small = has_move_in and (my_deposit <= small_limit)
+            eval_value = my_deposit
+            eval_text = f"임차보증금 {eval_value:,}만원"
+            
+        else:
+            # 상임법 기준 (환산보증금 기준)
+            converted_deposit = my_deposit + (my_monthly_rent * 100)
+            
+            if region == "서울특별시": small_limit, small_protect = 6500, 2200
+            elif "과밀억제" in region: small_limit, small_protect = 5500, 1900
+            elif "광역시" in region: small_limit, small_protect = 3800, 1300
+            else: small_limit, small_protect = 3000, 1000 # 양산시 등
+            
+            is_small = has_move_in and (converted_deposit <= small_limit)
+            eval_value = converted_deposit
+            eval_text = f"환산보증금 {eval_value:,}만원 (보증금 {my_deposit} + 월세 {my_monthly_rent}×100)"
+
+        c_auth1, c_auth2 = st.columns(2)
+        with c_auth1:
+            if is_small:
+                st.success(f"**[소액임차인 최우선변제 대상 O]**\n\n✅ 적용 법률: {lease_type}\n✅ 판단 기준: {eval_text}이 지역 기준({small_limit:,}만원) 이하 충족\n\n경매 시 선순위 권리자보다 우선하여 **최대 {small_protect:,}만원**을 최우선변제 받습니다. (단, 매각대금의 1/2 한도 내)")
+                guaranteed_money = small_protect
+            else:
+                st.warning(f"**[소액임차인 최우선변제 대상 X]**\n\n⚠️ 적용 법률: {lease_type}\n⚠️ 판단 기준: {eval_text}이 지역 기준({small_limit:,}만원) 초과\n\n최우선변제권이 없으므로, 확정일자에 따른 순위(우선변제권)로만 배당을 다투어야 합니다.")
+                guaranteed_money = 0
+                
+        with c_auth2:
+            if is_priority:
+                st.info("**[우선변제권 확보 O]**\n\n대항력 요건(전입/사업자+점유)과 확정일자를 모두 갖추었습니다.\n경매 시 본인 확정일자보다 늦은 후순위 권리자나 기타 채권자보다 우선하여 배당받을 권리가 있습니다.")
+            else:
+                st.error("**[우선변제권 미확보 X]**\n\n대항력 요건 또는 확정일자가 누락되었습니다.\n경매 시 후순위 일반채권자로 밀려 보증금을 전액 잃을 위험이 매우 큽니다. 즉시 요건을 보완하십시오.")
+
+        # ---------------------------------------------------------
+        # 2. 보증금 안전성 및 경매 유찰 시뮬레이션
+        # ---------------------------------------------------------
+        st.markdown("---")
+        st.subheader("💡 깡통전세 및 보증금 안전 진단 요약")
+        
+        total_prior_debt = prior_mortgage + prior_deposits
         c1, c2, c3 = st.columns(3)
         c1.metric("예상 건물 시세", f"{market_price:,} 만원")
         c2.metric("나보다 앞선 빚 총액", f"{total_prior_debt:,} 만원", delta_color="inverse")
@@ -1523,36 +1608,42 @@ elif app_mode == "⚖️ 2. 보증금 안전성 및 권리분석 (깡통전세/�
 
         st.markdown("#### 📉 만약 건물이 경매로 넘어간다면?")
         
-        # 경매 유찰 시뮬레이션 (경남권 일반적인 20% 저감률 적용)
-        # 1회 유찰시 감정가의 80%, 2회 유찰시 64%, 3회 유찰시 51.2%
+        # 경매 유찰 시뮬레이션 (일반적인 20% 저감률 적용)
         drop_1 = market_price * 0.80
         drop_2 = market_price * 0.64
         drop_3 = market_price * 0.512
         
-        # 안전 판단 로직 (내 보증금까지 무사히 받을 수 있는지)
-        required_money = total_prior_debt + my_deposit
+        # 내 보증금을 건지기 위해 필요한 최소 낙찰가
+        # (최우선변제금은 0순위로 배당받으므로, 나머지 금액만 순위에 따라 받으면 됨)
+        remaining_deposit = my_deposit - guaranteed_money
+        if remaining_deposit < 0: remaining_deposit = 0
         
-        if drop_2 >= required_money:
+        required_money = total_prior_debt + remaining_deposit
+        
+        if not is_priority and remaining_deposit > 0:
+            status = "🔴 매우 위험 (우선변제권 없음)"
+            status_msg = f"우선변제권이 없어 배당 순위가 밀립니다. 최우선변제금({guaranteed_money:,}만원)을 제외한 나머지 보증금 **{remaining_deposit:,}만원은 전액 손실될 위험**이 높습니다. 절대 계약을 피해야 합니다."
+        elif drop_2 >= required_money:
             status = "🟢 안전"
-            status_msg = "이 물건은 경매에 넘어가서 **2번 유찰(시세의 64%)**되더라도, 낙찰 대금으로 선순위 빚을 모두 갚고도 **내 보증금을 100% 안전하게 돌려받을 수 있습니다.** 안심하고 들어가셔도 좋습니다."
+            status_msg = f"이 물건은 경매에 넘어가서 **2번 유찰(시세의 64%, {drop_2:,.0f}만원)**에 낙찰되더라도, 선순위 빚을 갚고 **내 보증금을 100% 돌려받을 수 있습니다.** 안심하셔도 좋습니다."
         elif drop_1 >= required_money:
-            status = "🟡 약간 불안"
-            status_msg = "경매에서 **1번 유찰(시세의 80%)** 선에서 낙찰되면 안전하지만, 2번 유찰될 경우 내 보증금 중 일부를 돌려받지 못할 수 있습니다. 시세 하락기에는 보증금을 낮추거나 계약을 재고하는 것이 좋습니다."
+            status = "🟡 약간 불안 (시세 하락 주의)"
+            status_msg = f"경매에서 **1번 유찰(시세의 80%, {drop_1:,.0f}만원)** 선에서 낙찰되면 안전하지만, 2번 유찰될 경우 내 보증금 중 일부({(required_money - drop_2):,.0f}만원 가량)를 잃을 수 있습니다."
         else:
-            status = "🔴 위험 (들어가지 마세요 / 깡통전세 위험)"
-            status_msg = f"건물이 경매로 넘어가 **1번만 유찰**되어도 내 보증금을 온전히 돌려받을 수 없습니다. 현재 깡통전세 상태와 다름없으며, **보증금 {my_deposit:,}만원 중 심각한 손실이 예상됩니다.** 계약을 강력히 만류합니다."
+            status = "🔴 위험 (깡통전세 위험)"
+            status_msg = f"건물이 **1번만 유찰(80%)**되어도 내 보증금을 온전히 돌려받을 수 없는 깡통전세 상태입니다. 경매 진행 시 **최소 {(required_money - drop_1):,.0f}만원 이상의 금전적 손실**이 확정적이므로 계약을 강력히 만류합니다."
 
         st.markdown(f"### 판정 등급: **{status}**")
-        st.warning(status_msg)
+        if status.startswith("🟢"): st.success(status_msg)
+        elif status.startswith("🟡"): st.warning(status_msg)
+        else: st.error(status_msg)
 
-        # 상세 유찰 가격표
-        st.markdown("#### 📑 경매 유찰 가격 시뮬레이션 (저감률 20% 가정)")
+        st.markdown("#### 📑 경매 유찰 가격 시뮬레이션 (저감률 20% 기준)")
+        st.info(f"""
+        * **신건 (100%):** {market_price:,.0f} 만원
+        * **1회 유찰 (80%):** {drop_1:,.0f} 만원
+        * **2회 유찰 (64%):** {drop_2:,.0f} 만원
+        * **3회 유찰 (51%):** {drop_3:,.0f} 만원
         
-        info_text = (
-            f"* **신건 (100%):** {market_price:,.0f} 만원\n"
-            f"* **1회 유찰 (80%):** {drop_1:,.0f} 만원\n"
-            f"* **2회 유찰 (64%):** {drop_2:,.0f} 만원\n"
-            f"* **3회 유찰 (51%):** {drop_3:,.0f} 만원\n\n"
-            f"👉 내 보증금을 지키려면 낙찰가가 최소 **{required_money:,.0f} 만원** 이상 나와야 합니다."
-        )
-        st.info(info_text)
+        👉 선순위 채권을 모두 덮고 내 보증금까지 무사히 배당받으려면, 누군가 최소 **{required_money:,.0f} 만원** 이상에 낙찰을 받아야 합니다.
+        """)
