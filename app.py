@@ -40,7 +40,7 @@ with st.sidebar:
                         "classType": "KSIC",
                         "format": "json"
                     }
-                    response = requests.get(url, params=params, timeout=10)
+                    response = requests.get(url, params=params, timeout=10, verify=False)
                     
                     if response.status_code == 200:
                         data = response.json()
