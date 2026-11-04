@@ -867,9 +867,14 @@ if app_mode == "🏢 1. 공법 및 인허가 진단 (일반 매매/임대)":
                 # 여러 CSV 병합으로 인한 NaN 방지를 위해 선택된 지번의 모든 행 추출
                 matched_rows = f_df[f_df[jibun_col].fillna('').astype(str) == sel_addr]
                 
-                # 산단 업종코드 및 명칭 컬럼명 유추 강화
-                code_col = next((c for c in cols if '코드' in c or '분류' in c), cols[2] if len(cols) > 2 else '')
-                name_col = next((c for c in cols if ('명' in c or '품목' in c or '업종' in c) and c != code_col), cols[3] if len(cols) > 3 else '')
+                # 다른 CSV 파일(지역지구구역 등)의 '코드' 컬럼과 혼동되지 않도록 정확한 키워드 매칭
+                code_col = next((c for c in cols if '허용 업종코드' in c or '업종코드' in c), '')
+                name_col = next((c for c in cols if '업종 명칭' in c or '선택된 업종' in c), '')
+                
+                if not code_col:
+                    code_col = next((c for c in cols if '코드' in c and '업종' in c), cols[2] if len(cols) > 2 else '')
+                if not name_col:
+                    name_col = next((c for c in cols if '명칭' in c and '업종' in c), cols[3] if len(cols) > 3 else '')
                 
                 # 코드가 실제로 존재하는(결측치가 아닌) 행을 최우선으로 선택
                 selected_parcel_row = matched_rows.iloc[0]
@@ -1193,7 +1198,7 @@ if app_mode == "🏢 1. 공법 및 인허가 진단 (일반 매매/임대)":
                             f"[학원(500㎡이상) 합법화 대안 - 건축법 시행령 별표1] 동일 건물 내 해당 용도로 쓰이는 바닥면적 합계가 500㎡ 이상인 학원은 주용도가 반드시 **'교육연구시설'**이어야 합니다. (현재: {bld_use}, 면적: {area}㎡)\n\n"
                             f"💡 **[실무 체크포인트 및 합법화 대안]**\n"
                             f"1. **용도변경 필수:** 관할 건축과를 통해 '교육연구시설(6군)'로 정식 용도변경 허가(또는 신고)를 득해야 양산교육지원청 학원 설립 인가가 나옵니다.\n"
-                            f"2. **학원법 제5조 (유해업소 혼재 금지) ★치명적 주의★:** 동일 건물 내에 단란주점, 유흥주점, 안마시술소 등 유해업소가 단 1개라도 존재한다면 **학원 설립이 원천 금지**됩니다. 계약 전 건축물대장 및 실제 입점 상가를 전체 전수조사해야 합니다. (단, 연면적 1,650㎡ 이상 대형 상가의 경우 층이나 이격 거리에 따른 예외 허용 조항이 있으니 교육청 사전 질의 필수)"
+                            f"2. **학원법 제5조 (유해업소 혼재 금지) ★치명적 주의★:** 동일 건물 내에 단란주점, 유흥주점, 안마시술소 등 유해업소가 단 1개라도 존재한다면 **학원 설립이 원천 금지**됩니다. 계약 전 건축물대장 및 실제 입점 상가를 전체 전수조사해야 정합니다. (단, 연면적 1,650㎡ 이상 대형 상가의 경우 층이나 이격 거리에 따른 예외 허용 조항이 있으니 교육청 사전 질의 필수)"
                         )
                     else:
                         legal_actions.append(
