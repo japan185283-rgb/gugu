@@ -863,13 +863,31 @@ if app_mode == "🏢 1. 공법 및 인허가 진단 (일반 매매/임대)":
             if len(f_df) > 0:
                 parcel_options = f_df[jibun_col].fillna('').astype(str).unique().tolist()
                 sel_addr = st.selectbox("조회된 필지(지번) 선택", parcel_options, key="ind_parcel_selectbox_field")
-                selected_parcel_row = f_df[f_df[jibun_col].fillna('').astype(str) == sel_addr].iloc[0]
                 
-                code_col = next((c for c in cols if '코드' in c or '업종' in c), cols[2] if len(cols) > 2 else '')
-                name_col = next((c for c in cols if '명' in c or '품목' in c), cols[3] if len(cols) > 3 else '')
+                # 여러 CSV 병합으로 인한 NaN 방지를 위해 선택된 지번의 모든 행 추출
+                matched_rows = f_df[f_df[jibun_col].fillna('').astype(str) == sel_addr]
                 
-                auto_detected_code = str(selected_parcel_row.get(code_col, ''))
-                auto_detected_name = str(selected_parcel_row.get(name_col, ''))
+                # 산단 업종코드 및 명칭 컬럼명 유추 강화
+                code_col = next((c for c in cols if '코드' in c or '분류' in c), cols[2] if len(cols) > 2 else '')
+                name_col = next((c for c in cols if ('명' in c or '품목' in c or '업종' in c) and c != code_col), cols[3] if len(cols) > 3 else '')
+                
+                # 코드가 실제로 존재하는(결측치가 아닌) 행을 최우선으로 선택
+                selected_parcel_row = matched_rows.iloc[0]
+                for _, row in matched_rows.iterrows():
+                    c_val = str(row.get(code_col, '')).strip()
+                    if c_val and c_val.lower() not in ['nan', 'none', '']:
+                        selected_parcel_row = row
+                        break
+                
+                raw_code = selected_parcel_row.get(code_col, '')
+                raw_name = selected_parcel_row.get(name_col, '')
+                
+                auto_detected_code = "" if pd.isna(raw_code) else str(raw_code).strip()
+                auto_detected_name = "" if pd.isna(raw_name) else str(raw_name).strip()
+                
+                if auto_detected_code.lower() in ['nan', 'none']: auto_detected_code = ""
+                if auto_detected_name.lower() in ['nan', 'none']: auto_detected_name = ""
+                
                 st.success(f"🎯 **[지번 매칭 완료]** `{sel_addr}` (허용 업종코드/명칭: {auto_detected_code} {auto_detected_name})")
             else:
                 st.warning("⚠ 일치하는 지번 또는 도로명이 없습니다. 검색어를 다시 확인해주세요.")
@@ -1052,7 +1070,7 @@ if app_mode == "🏢 1. 공법 및 인허가 진단 (일반 매매/임대)":
                 
                 if ("단란" in target_biz and area < 150 and bld_use not in ["제2종근린생활시설", "위락시설"]) or (req_use == "위락시설" and bld_use != "위락시설"):
                     fatal_errors.append(
-                        f"[건축법 위반 / 입점 제한 - 건축법 시행령 별표1] 유흥주점 및 무도장은 반드시 주용도가 **'위락시설'**이어야 하며, 단란주점은 150㎡ 미만일 때만 제2종근생이 가능합니다. (현재 주용도: {bld_use}, 면적: {area}㎡)\n\n"
+                        f"[건축법 위반 / 입점 제한 - 건축법 시행령 별표1] 유흥주점 및 무도장은 반드시 주용도가 **'위락시설'**이어야 단란주점은 150㎡ 미만일 때만 제2종근생이 가능합니다. (현재 주용도: {bld_use}, 면적: {area}㎡)\n\n"
                         f"💡 **[치명적 실무 체크포인트]** 일반 상가건물을 '위락시설'로 용도변경하는 것은 건축법상 주차 대수 및 소방 기준이 매우 가혹하여 현실적으로 불가능에 가깝습니다. 처음부터 대장상 주용도가 **'위락시설'**로 허가난 매물만 중개/계약해야 합니다."
                     )
                 else:
